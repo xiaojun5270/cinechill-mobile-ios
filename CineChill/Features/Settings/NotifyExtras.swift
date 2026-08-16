@@ -2,9 +2,10 @@ import SwiftUI
 
 /// Telegram 账号登录：发送验证码 + 登录。
 struct TelegramLoginView: View {
-    @State var apiID: String
-    @State var apiHash: String
-    @State var phone: String
+    // 给默认值，这样既能被 NotifyView 带着凭据推进来，也能从「全部功能」里空手打开
+    @State var apiID = ""
+    @State var apiHash = ""
+    @State var phone = ""
 
     @EnvironmentObject private var session: AppSession
     @StateObject private var runner = ActionRunner()

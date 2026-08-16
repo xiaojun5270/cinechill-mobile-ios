@@ -101,6 +101,13 @@ jobs:
           grep -n "error:" build.log | head -80 || true
           echo '--- 最后 40 行 ---'
           tail -40 build.log || true
+          # 同时写进 Job Summary：这份摘要通过公开的 check-run API 就能读到，不需要令牌
+          {
+            echo '### 编译失败'
+            echo '```'
+            grep -A2 "error:" build.log | head -120 || true
+            echo '```'
+          } >> "${GITHUB_STEP_SUMMARY}" || true
 
       - name: 打 tag 时发布 Release
         if: startsWith(github.ref, 'refs/tags/v')
