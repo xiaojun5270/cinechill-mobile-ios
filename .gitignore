@@ -13,6 +13,9 @@ build.log
 *.hmap
 *.ipa.zip
 
+# 临时凭据文件，绝不提交
+gh_token.txt
+
 # 本地参考资料：Admin 快照里带服务器地址与 3.2MB 缓存图片，不进公开仓库
 CineChill Admin.html
 CineChill Admin_files/
