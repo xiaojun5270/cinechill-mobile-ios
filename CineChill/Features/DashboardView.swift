@@ -41,7 +41,6 @@ struct DashboardView: View {
             ])
         } content: { value, reload in
             greeting
-            FavoriteModulesCard()
             let overview = value["overview"]
             let mediaStats = overview["media_stats"].isNull ? value["stats"] : overview["media_stats"]
             libraryOverview(mediaStats, overview: overview)
@@ -68,26 +67,17 @@ struct DashboardView: View {
     // MARK: - 顶部问候
 
     private var greeting: some View {
-        CardSection(title: session.activeServer?.displayName ?? "CineChill",
-                    systemImage: "sparkles") {
-            VStack(alignment: .leading, spacing: 6) {
-                Text("\(salutation)，\(session.displayUsername)")
-                    .font(.title3.weight(.semibold))
-                Text("好内容不怕晚一点抵达，稳定才是长久的浪漫。")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-                HStack(spacing: 8) {
-                    if let version = session.serverVersion {
-                        StatusBadge("v\(version)", tone: .info)
-                    }
-                    if let host = session.activeServer?.baseURLString {
-                        Text(host)
-                            .font(.caption.monospaced())
-                            .foregroundStyle(.secondary)
-                    }
-                }
-            }
+        VStack(alignment: .leading, spacing: 6) {
+            Text("\(salutation)，\(session.displayUsername)")
+                .font(.title3.weight(.semibold))
+            Text("好内容不怕晚一点抵达，稳定才是长久的浪漫。")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
         }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color(uiColor: .secondarySystemGroupedBackground),
+                    in: RoundedRectangle(cornerRadius: 14))
     }
 
     private var salutation: String {
