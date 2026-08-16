@@ -25,14 +25,6 @@ struct TaskCenterView: View {
                 } label: {
                     Label("系统日志", systemImage: "doc.plaintext")
                 }
-                Button(role: .destructive) {
-                    runner.run("已清空进度", operation: {
-                        let api = try session.requireAPI()
-                        return try await api.tasks.clearTaskProgress(.object([:]))
-                    }, onSuccess: { await reload() })
-                } label: {
-                    Label("清空进度记录", systemImage: "eraser")
-                }
             }
         }
         .actionFeedback(runner)
@@ -42,8 +34,10 @@ struct TaskCenterView: View {
 
     @ViewBuilder
     private func progressSection(_ progress: JSONValue, reload: Reload) -> some View {
-        let running = progress.list("running", "tasks", "items")
-        Section("运行中") {
+        let tasks = normalizedProgressTasks(progress)
+        let running = tasks.filter { isActiveProgressTask($0) }
+        let finished = tasks.filter { !isActiveProgressTask($0) }
+        Section("运行中（\(running.count)）") {
             if running.isEmpty {
                 if let text = progress.deepFirst(of: "message", "status").displayString {
                     Text(text).font(.footnote).foregroundStyle(.secondary)
@@ -52,40 +46,104 @@ struct TaskCenterView: View {
                 }
             }
             ForEach(Array(running.enumerated()), id: \.offset) { _, task in
-                VStack(alignment: .leading, spacing: 6) {
-                    HStack {
-                        Text(task.first(of: "name", "task_name", "title").displayString ?? "任务")
-                            .font(.subheadline.weight(.medium))
-                        Spacer()
-                        if let state = task.first(of: "status", "state").displayString {
-                            StatusBadge(state, tone: badgeTone(for: state))
-                        }
-                    }
-                    let ratio = Fmt.ratio(task.deepFirst(of: "progress", "percent", "ratio"))
-                    ProgressView(value: ratio)
-                    HStack {
-                        if let step = task.first(of: "message", "current", "step").displayString {
-                            Text(step).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
-                        }
-                        Spacer()
-                        Text(Fmt.percent(.double(ratio), digits: 0))
-                            .font(.caption2.monospacedDigit())
-                            .foregroundStyle(.secondary)
-                    }
-                    if let id = task.first(of: "id", "task_id", "run_id").displayString {
-                        Button("停止") {
-                            runner.run("已请求停止", operation: {
-                                let api = try session.requireAPI()
-                                return try await api.tasks.stopTask(.object(["id": .string(id)]))
-                            }, onSuccess: { await reload() })
-                        }
-                        .font(.caption)
-                        .buttonStyle(.borderless)
-                        .foregroundStyle(.red)
-                    }
+                progressTaskRow(task, active: true, reload: reload)
+            }
+        }
+        Section("最近完成（\(finished.count)）") {
+            if finished.isEmpty { EmptyRow("暂无已完成任务") }
+            ForEach(Array(finished.enumerated()), id: \.offset) { _, task in
+                progressTaskRow(task, active: false, reload: reload)
+            }
+            if !finished.isEmpty {
+                Button(role: .destructive) {
+                    clearProgress(finished, reload: reload)
+                } label: {
+                    Label("清除已完成记录", systemImage: "eraser")
                 }
             }
         }
+    }
+
+    @ViewBuilder
+    private func progressTaskRow(_ task: JSONValue, active: Bool, reload: Reload) -> some View {
+        let runID = task.first(of: "run_id", "id", "task_id").displayString ?? ""
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Text(task.first(of: "name", "task_name", "title").displayString ?? "任务")
+                    .font(.subheadline.weight(.medium))
+                Spacer()
+                if let state = task.first(of: "status", "state").displayString {
+                    StatusBadge(state, tone: badgeTone(for: state))
+                }
+            }
+            let ratio = Fmt.ratio(task.deepFirst(of: "progress", "percent", "ratio"))
+            ProgressView(value: ratio)
+            HStack {
+                if let step = task.deepFirst(of: "message", "current", "step", "display_status").displayString {
+                    Text(step).font(.caption2).foregroundStyle(.secondary).lineLimit(2)
+                }
+                Spacer()
+                Text(Fmt.percent(.double(ratio), digits: 0))
+                    .font(.caption2.monospacedDigit())
+                    .foregroundStyle(.secondary)
+            }
+            if !runID.isEmpty {
+                Button(active ? "停止" : "清除记录") {
+                    if active {
+                        runner.run("已请求停止", operation: {
+                            let api = try session.requireAPI()
+                            return try await api.tasks.stopTask(.object(["run_id": .string(runID)]))
+                        }, onSuccess: { await reload() })
+                    } else {
+                        runner.run("已清除进度记录", operation: {
+                            let api = try session.requireAPI()
+                            return try await api.tasks.clearTaskProgress(.object(["run_id": .string(runID)]))
+                        }, onSuccess: { await reload() })
+                    }
+                }
+                .font(.caption)
+                .buttonStyle(.borderless)
+                .foregroundStyle(.red)
+            }
+        }
+    }
+
+    private func clearProgress(_ tasks: [JSONValue], reload: Reload) {
+        let runIDs = tasks.compactMap { $0.first(of: "run_id", "id", "task_id").displayString }
+        runner.run("已清除完成记录", operation: {
+            let api = try session.requireAPI()
+            var cleared = 0
+            for runID in runIDs {
+                _ = try await api.tasks.clearTaskProgress(.object(["run_id": .string(runID)]))
+                cleared += 1
+            }
+            return .object(["success": .bool(true), "cleared": .int(cleared)])
+        }, onSuccess: { await reload() })
+    }
+
+    /// v73 以 run_id 为键返回任务对象，旧版本也可能直接返回数组。
+    private func normalizedProgressTasks(_ value: JSONValue) -> [JSONValue] {
+        let list = value.list("running", "tasks", "items")
+            .filter { $0.object != nil }
+        if !list.isEmpty { return list }
+
+        let keyedTasks = value["tasks"].object ?? value.object ?? [:]
+        let wrapperKeys: Set<String> = [
+            "message", "status", "success", "ok", "detail", "error", "msg",
+        ]
+        return keyedTasks.keys.sorted(by: >).compactMap { runID in
+            guard !wrapperKeys.contains(runID), var task = keyedTasks[runID]?.object else { return nil }
+            if task["run_id"]?.isNull != false {
+                task["run_id"] = .string(runID)
+            }
+            return .object(task)
+        }
+    }
+
+    private func isActiveProgressTask(_ task: JSONValue) -> Bool {
+        if task.first(of: "cancel_requested", "cancellation_requested").bool == true { return true }
+        let state = task.first(of: "status", "state").displayString?.lowercased() ?? ""
+        return ["running", "pending", "queued", "waiting", "stopping", "cancelling"].contains(state)
     }
 
     // MARK: - 已保存任务

@@ -1,6 +1,7 @@
 import SwiftUI
 
 struct UploadTaskDraft: Identifiable {
+    var raw: JSONValue
     var id: String
     var name: String
     var enabled: Bool
@@ -11,9 +12,11 @@ struct UploadTaskDraft: Identifiable {
     var watchMode: String
     var includeExisting: Bool
     var deleteLocal: Bool
+    var deleteDownloaderAfterAllUploaded: Bool
     var skipWhenNoRapid: Bool
 
     init() {
+        raw = .object([:])
         id = ""
         name = ""
         enabled = true
@@ -24,10 +27,12 @@ struct UploadTaskDraft: Identifiable {
         watchMode = "realtime"
         includeExisting = true
         deleteLocal = false
+        deleteDownloaderAfterAllUploaded = false
         skipWhenNoRapid = false
     }
 
     init(_ task: JSONValue) {
+        raw = task
         id = task.first(of: "id", "task_id").displayString ?? ""
         name = task.first(of: "name").string ?? ""
         enabled = task.first(of: "enabled").bool ?? true
@@ -35,9 +40,11 @@ struct UploadTaskDraft: Identifiable {
         targetCID = task.first(of: "target_cid").displayString ?? ""
         targetName = task.first(of: "target_name").string ?? ""
         targetPath = task.first(of: "target_path").string ?? ""
-        watchMode = task.first(of: "watch_mode").string ?? "realtime"
+        let storedMode = task.first(of: "watch_mode").string ?? "realtime"
+        watchMode = storedMode == "scan" ? "manual" : storedMode
         includeExisting = task.first(of: "include_existing_on_start").bool ?? true
         deleteLocal = task.first(of: "delete_local_after_success").bool ?? false
+        deleteDownloaderAfterAllUploaded = task.first(of: "delete_downloader_after_all_uploaded").bool ?? false
         skipWhenNoRapid = task.first(of: "skip_upload_when_no_rapid_resource").bool ?? false
     }
 }
@@ -51,6 +58,7 @@ struct UploadTaskEditorView: View {
     @StateObject private var runner = ActionRunner()
     @State private var pickingCloud = false
     @State private var pickingLocal = false
+    @State private var confirmingDownloaderCleanup = false
 
     private var isNew: Bool { draft.id.isEmpty }
 
@@ -60,7 +68,7 @@ struct UploadTaskEditorView: View {
                 TextField("任务名称", text: $draft.name)
                 Picker("监听模式", selection: $draft.watchMode) {
                     Text("实时监听").tag("realtime")
-                    Text("定时扫描").tag("scan")
+                    Text("手动扫描").tag("manual")
                 }
                 Toggle("启用", isOn: $draft.enabled)
             }
@@ -90,6 +98,15 @@ struct UploadTaskEditorView: View {
             Section("行为") {
                 Toggle("启动时包含已存在文件", isOn: $draft.includeExisting)
                 Toggle("上传成功后删除本地文件", isOn: $draft.deleteLocal)
+                Toggle("整种完成后清理下载器", isOn: Binding(
+                    get: { draft.deleteDownloaderAfterAllUploaded },
+                    set: { enabled in
+                        if enabled {
+                            confirmingDownloaderCleanup = true
+                        } else {
+                            draft.deleteDownloaderAfterAllUploaded = false
+                        }
+                    }))
                 Toggle("无秒传资源时跳过上传", isOn: $draft.skipWhenNoRapid)
             }
             Section {
@@ -120,23 +137,36 @@ struct UploadTaskEditorView: View {
                 }
             }
         }
+        .confirmationDialog("开启整种清理？", isPresented: $confirmingDownloaderCleanup,
+                            titleVisibility: .visible) {
+            Button("确认开启", role: .destructive) {
+                draft.deleteDownloaderAfterAllUploaded = true
+            }
+            Button("取消", role: .cancel) {}
+        } message: {
+            Text("同一种子的全部目标文件上传完成后，服务端会删除下载器任务及源数据。")
+        }
     }
 
     private func save() {
         runner.run("已保存", operation: {
             let api = try session.requireAPI()
-            let payload = UploadTaskPayload(name: draft.name,
-                                            enabled: draft.enabled,
-                                            localFolder: draft.localFolder,
-                                            targetCid: draft.targetCID,
-                                            targetName: draft.targetName,
-                                            targetPath: draft.targetPath,
-                                            watchMode: draft.watchMode,
-                                            includeExistingOnStart: draft.includeExisting,
-                                            deleteLocalAfterSuccess: draft.deleteLocal,
-                                            skipUploadWhenNoRapidResource: draft.skipWhenNoRapid)
-            if isNew { return try await api.upload115.createTask(payload) }
-            return try await api.upload115.updateTask(taskId: draft.id, payload)
+            var fields = draft.raw.object ?? [:]
+            fields["name"] = .string(draft.name)
+            fields["enabled"] = .bool(draft.enabled)
+            fields["local_folder"] = .string(draft.localFolder)
+            fields["target_cid"] = .string(draft.targetCID)
+            fields["target_name"] = .string(draft.targetName)
+            fields["target_path"] = .string(draft.targetPath)
+            fields["watch_mode"] = .string(draft.watchMode)
+            fields["include_existing_on_start"] = .bool(draft.includeExisting)
+            fields["delete_local_after_success"] = .bool(draft.deleteLocal)
+            fields["delete_downloader_after_all_uploaded"] = .bool(draft.deleteDownloaderAfterAllUploaded)
+            fields["skip_upload_when_no_rapid_resource"] = .bool(draft.skipWhenNoRapid)
+            let payload = JSONValue.object(fields)
+            return try await api.upload115.saveTaskPreservingFields(
+                taskID: isNew ? nil : draft.id,
+                body: payload)
         }, onSuccess: {
             onSaved()
             dismiss()

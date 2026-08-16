@@ -31,7 +31,7 @@ struct Cloud115RapidView: View {
             sourceSection
             targetSection
             Section("并发") {
-                Stepper("秒传并发 \(concurrency)", value: $concurrency, in: 1...16)
+                Stepper("秒传并发 \(concurrency)", value: $concurrency, in: 1...30)
             }
             submitSection
             recentJobSection

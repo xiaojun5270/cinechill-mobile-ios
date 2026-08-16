@@ -95,7 +95,7 @@ struct MediaOrganizeView: View {
     }
 }
 
-/// 整理配置：字段极多，交给通用 JSON 编辑器，保存时转成强类型 body。
+/// 整理配置：字段极多，交给通用 JSON 编辑器并原样保存，兼容服务端新增字段。
 struct OrganizeConfigView: View {
     @EnvironmentObject private var session: AppSession
 
@@ -109,8 +109,7 @@ struct OrganizeConfigView: View {
             },
             save: { edited in
                 let api = try session.requireAPI()
-                let body = try edited.decoded(MediaOrganizeConfig.self)
-                return try await api.organize.saveConfig(body)
+                return try await api.organize.saveConfigPreservingFields(edited)
             })
     }
 }

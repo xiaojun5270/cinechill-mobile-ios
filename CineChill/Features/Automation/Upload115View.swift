@@ -90,7 +90,7 @@ struct Upload115View: View {
                 Button("扫描") {
                     runner.run("已触发扫描", operation: {
                         let api = try session.requireAPI()
-                        return try await api.upload115.scanTask(taskId: id, .object([:]))
+                        return try await api.upload115.scanTask(taskId: id, .object(["force": .bool(true)]))
                     }, onSuccess: { await reload() })
                 }
                 Button("停止") {
@@ -196,6 +196,14 @@ struct UploadTaskStatusView: View {
                             return try await api.upload115.retryFile(taskId: taskID, RetryPayload(jobId: jobID))
                         }, onSuccess: { await reload() })
                     }
+                    if isCancellableUploadJob(job) {
+                        Button("取消上传") {
+                            runner.run("已请求取消", operation: {
+                                let api = try session.requireAPI()
+                                return try await api.upload115.cancelFile(taskID: taskID, jobID: jobID)
+                            }, onSuccess: { await reload() })
+                        }
+                    }
                     Button("删除记录") {
                         runner.run("已删除", operation: {
                             let api = try session.requireAPI()
@@ -228,9 +236,9 @@ struct UploadThreadSettingsView: View {
     var body: some View {
         Form {
             Section("并发数") {
-                Stepper("校验并发 \(verify)", value: $verify, in: 1...32)
-                Stepper("秒传并发 \(rapid)", value: $rapid, in: 1...32)
-                Stepper("上传并发 \(upload)", value: $upload, in: 1...32)
+                Stepper("校验并发 \(verify)", value: $verify, in: 1...30)
+                Stepper("秒传并发 \(rapid)", value: $rapid, in: 1...30)
+                Stepper("上传并发 \(upload)", value: $upload, in: 1...30)
             }
             Section {
                 Button("保存") {
@@ -257,4 +265,11 @@ struct UploadThreadSettingsView: View {
             upload = value.deepFirst(of: "upload_concurrency").int ?? 5
         }
     }
+}
+
+private func isCancellableUploadJob(_ job: JSONValue) -> Bool {
+    let status = job.first(of: "status", "state").displayString?.lowercased() ?? ""
+    let stage = job.first(of: "stage").displayString?.lowercased() ?? ""
+    return ["active", "retrying"].contains(status)
+        && !["success", "failed", "cancelled", "cancelling"].contains(stage)
 }

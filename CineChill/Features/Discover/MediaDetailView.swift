@@ -168,13 +168,23 @@ struct MediaDetailView: View {
         guard let id = summary.tmdbID else { return }
         runner.run(nil) {
             let api = try session.requireAPI()
-            let body = JSONValue.object([
+            let existenceKey = "\(id):\(summary.mediaType)"
+            let year = summary.raw.first(of: "year", "ProductionYear", "release_date", "first_air_date")
+                .displayString
+                .map { String($0.prefix(4)) } ?? ""
+            let item = JSONValue.object([
                 "tmdb_id": .int(id),
-                "media_type": .string(summary.mediaType),
                 "title": .string(summary.title),
+                "year": .string(year),
+                "media_type": .string(summary.mediaType),
+                "source": .string(summary.raw["source"].displayString ?? ""),
+                "id": summary.raw["id"].isNull ? .string("") : summary.raw["id"],
+                "_existence_key": .string(existenceKey),
             ])
-            let result = try await api.discover.checkLibraryExists(body, resolveMissing: nil)
-            let exists = result.deepFirst(of: "exists", "in_library", "found").bool ?? false
+            let result = try await api.discover.checkLibraryExists(.array([item]), resolveMissing: false)
+            let exists = result["results"][existenceKey].bool
+                ?? result.deepFirst(of: "exists", "in_library", "found").bool
+                ?? false
             return JSONValue.object([
                 "success": .bool(true),
                 "message": .string(exists ? "媒体库中已存在" : "媒体库中未找到"),

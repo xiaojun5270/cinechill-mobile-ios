@@ -8,7 +8,7 @@
 
 在 Mac 上打开 `CineChill.xcodeproj` 后，选中 `CineChill` target，在 Signing & Capabilities 里换成你自己的开发团队（Bundle ID 默认是 `com.cinechill.mobile`，可自行修改），然后选真机或模拟器运行即可。部署目标是 iOS 17.0，Swift 语言版本 5，iPhone 与 iPad 通用。App 图标是脚本生成的纯色渐变胶片图形，`AppIcon.appiconset` 里放了 1024×1024 的浅色、深色与 tinted 三套单尺寸图（iOS 17 的单一尺寸规范），启动屏用 `Info.plist` 的 `UILaunchScreen` 配合 `LaunchBackground` 颜色与 `LaunchLogo` 图片，不需要 storyboard。想换成自己的图，替换 `Assets.xcassets` 里的同名文件即可。
 
-需要特别说明的是，本机是 Windows + Linux 容器环境，没有 Swift 工具链，所以代码是靠约束写法加脚本静态校验写出来的：所有 API 调用点、模型初始化参数标签、复用组件签名都用脚本逐一比对过生成代码，检查项包括括号配平、重复类型声明、`api.<分组>.<方法>` 是否存在、99 个请求模型的参数标签是否匹配、`session.` 与 `Fmt.` 成员是否存在、是否有声明了却没被引用的视图、ViewBuilder 单块子视图是否超过 10 个上限、功能索引里 81 个条目的 id 唯一性与目标视图是否真实存在，以及每个索引入口是否真的能无参构造。真正的编译验证交给 GitHub Actions，**目前已在 macOS runner 的 Xcode 16.4 / iPhoneOS 18.5 SDK 上编译通过并打出 IPA**（见下文）。带全部新功能的第一次构建失败过一次，原因是 `TelegramLoginView` 的三个 `@State` 属性没写默认值——属性包装器并不会让属性免于进入 memberwise 初始化器，于是那个视图没有无参初始化器，而功能索引正是用 `TelegramLoginView()` 打开它的；这条规则已经补进校验脚本。
+需要特别说明的是，本机是 Windows + Linux 容器环境，没有 Swift 工具链，所以代码是靠约束写法加脚本静态校验写出来的：所有 API 调用点、模型初始化参数标签、复用组件签名都用脚本逐一比对过生成代码，检查项包括括号配平、重复类型声明、`api.<分组>.<方法>` 是否存在、99 个请求模型的参数标签是否匹配、`session.` 与 `Fmt.` 成员是否存在、是否有声明了却没被引用的视图、ViewBuilder 单块子视图是否超过 10 个上限、功能索引里 82 个条目的 id 唯一性与目标视图是否真实存在，以及每个索引入口是否真的能无参构造。真正的编译验证交给 GitHub Actions；工作流会强制检查 Xcode 与 iPhoneOS SDK 26 以上，避免用旧 SDK 产出没有系统 Liquid Glass 的 IPA。
 
 ## 架构
 
@@ -34,7 +34,7 @@
 
 Web 后台没有、但手机上很需要的几件事，都做在了 `App/ModuleIndex.swift` 与 `Core/` 里。
 
-**全局功能搜索与收藏。**81 个二级页面登记在 `ModuleIndex` 里，每条记录带标题、所属分组、所属 Tab、图标、以及包含接口路径的关键词（例如搜 `/api/rss` 或搜「秒传」都能命中）。仪表盘右上角的放大镜、设置页「这台设备 → 全部功能」都进得去，搜索框支持空格分词的 AND 匹配。列表里左滑或长按任意页面即可收藏，收藏与最近访问（最多 8 条）会出现在仪表盘顶部的「常用」卡片和 iPad 侧边栏里，存在 `UserDefaults` 的 `modules.favorites` / `modules.recents`。
+**全局功能搜索与收藏。**82 个二级页面登记在 `ModuleIndex` 里，每条记录带标题、所属分组、所属 Tab、图标、以及包含接口路径的关键词（例如搜 `/api/rss` 或搜「秒传」都能命中）。仪表盘右上角的放大镜、设置页「这台设备 → 全部功能」都进得去，搜索框支持空格分词的 AND 匹配。列表里左滑或长按任意页面即可收藏，收藏与最近访问（最多 8 条）会出现在仪表盘顶部的「常用」卡片和 iPad 侧边栏里，存在 `UserDefaults` 的 `modules.favorites` / `modules.recents`。
 
 **iPad 分栏布局。**`MainTabView` 按 `horizontalSizeClass` 分流：紧凑宽度走原来的五个 Tab，regular 宽度（iPad 全屏、以及 iPad 分屏较宽的一侧）走 `NavigationSplitView`，左栏是五个模块加收藏页，右栏是独立的 `NavigationStack`。切换左栏条目时用 `.id(selection)` 重建右栏导航栈，避免上一个模块的详情页留在右侧。
 
@@ -42,7 +42,7 @@ Web 后台没有、但手机上很需要的几件事，都做在了 `App/ModuleI
 
 **任务完成通知。**`Core/TaskNotifier.swift` 每 45 秒在前台拉一次 `/api/progress`，把上一轮「在跑」而这一轮已完成或已消失的任务算作完成并发本地通知，失败的单独发一条「任务未完成」。首次开启只建立基线、不发通知，避免一次性弹一堆。开了「后台检查」后会注册 `BGAppRefreshTaskRequest`（标识 `com.cinechill.mobile.taskrefresh`，最短间隔 15 分钟），后台唤醒时用 `ServerStore` + 钥匙串里的信息自己建客户端，先试 Cookie、过期才静默登录一次，两者都不成立就安静放弃。**iOS 的后台刷新是「有机会才跑」**，实际间隔可能从十几分钟到数小时，要准时就在前台手动点「立即检查一次」。
 
-**液态玻璃导航栏。**`UI/GlassChrome.swift`。真正的 Liquid Glass 是 iOS 26 + Xcode 26 SDK 的系统行为，只要用新 SDK 重新编译，标准导航栏 / 标签栏 / 工具栏就自动是玻璃材质。所以这里做的是双轨：检测到「用 iOS 26 SDK 编译」且「跑在 iOS 26 及以上」时（`#if compiler(>=6.2)` 加运行时 `isOperatingSystemAtLeast(26)`），完全不干预，让系统自己画；否则在 iOS 17–18 上用 `UINavigationBarAppearance` / `UITabBarAppearance` / `UIToolbarAppearance` 的 `backgroundEffect` 装上 `.systemUltraThinMaterial` 模糊、去掉分割线、并把 scrollEdge 状态设成全透明，做出「静止时与内容连成一片、滚动时结霜」的近似效果。代码里没有出现任何 iOS 26 才有的符号名，因此用 Xcode 16 编译也不会报找不到 API。设置页「这台设备 → 外观」可以在「液态玻璃 / 磨砂玻璃 / 系统默认」之间切换——玻璃材质在浅色壁纸或高对比内容上有时会影响标题可读性，觉得不舒服就切回系统默认。
+**液态玻璃导航栏。**`UI/GlassChrome.swift`。真正的 Liquid Glass 是 iOS 26 + Xcode 26 SDK 的系统行为，只要用新 SDK 重新编译，标准导航栏 / 标签栏 / 工具栏就自动是玻璃材质。iPhone 底部始终只渲染一个系统 `TabView` 标签栏：检测到「用 iOS 26 SDK 编译」且「跑在 iOS 26 及以上」时（`#if compiler(>=6.2)` 加运行时 `isOperatingSystemAtLeast(26)`），完全不干预，让系统自己画；否则在同一个系统栏上通过 `UINavigationBarAppearance` / `UITabBarAppearance` / `UIToolbarAppearance` 使用 `.systemUltraThinMaterial` 近似，不再额外叠加自定义底栏。
 
 ## 服务器连接与登录
 
@@ -54,9 +54,9 @@ Web 后台没有、但手机上很需要的几件事，都做在了 `App/ModuleI
 
 打包用的是 `xcodebuild build` 加上 `CODE_SIGNING_ALLOWED=NO`，产物 `.app` 塞进 `Payload/` 后压成 `.ipa`，并删掉可能残留的 `_CodeSignature`。这样得到的包**不能直接装到 iPhone 上**，必须自己签：AltStore 或 Sideloadly 用 Apple ID 自签（免费账号 7 天有效期），或者用付费开发者证书、企业证书重签。想省掉这一步就得在工作流里塞证书与描述文件，那需要把 p12 和 profile 放进仓库 Secrets——目前没有这么做。
 
-工作流已经跑通：`main` 上最新提交在 macos-15 + Xcode 16.4（iPhoneOS 18.5 SDK、`-swift-version 5`、Release + 全模块优化）下编译通过，产出的无证书 IPA 约 3.5 MB。编译失败时工作流会把 `build.log` 里所有 `error:` 行打印到日志末尾，并把同一份摘要写进 Job Summary，也就是 Actions 页面里 run 概览直接能看到的那块，不用下载 artifact。
+工作流使用 Release + 全模块优化构建。编译失败时会把 `build.log` 里所有 `error:` 行打印到日志末尾，并把同一份摘要写进 Job Summary，也就是 Actions 页面里 run 概览直接能看到的那块，不用下载 artifact。
 
-工作流固定 `runs-on: macos-15`，并在开跑前检查 Xcode 主版本是否 ≥ 16（工程是 objectVersion 77 的同步文件夹格式，Xcode 15 打不开），版本不够会先找 `/Applications/Xcode_16*.app` 再切换，找不到就直接报错退出而不是编译到一半才失败。
+工作流固定 `runs-on: macos-15`，并在开跑前检查 Xcode 与 iPhoneOS SDK 主版本是否 ≥ 26；版本不够会寻找 runner 上安装的 Xcode 26+ 并切换，找不到就直接报错，防止生成只能显示旧式标签栏的 IPA。
 
 ## 需要注意的安全取舍
 

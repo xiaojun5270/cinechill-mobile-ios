@@ -23,20 +23,27 @@ jobs:
       - name: 拉取代码
         uses: actions/checkout@v4
 
-      - name: 选择 Xcode（工程要求 16 及以上）
+      - name: 选择 Xcode 26+（启用原生 Liquid Glass）
         run: |
           set -eu
           current=$(xcodebuild -version | head -1 | awk '{print $2}')
           major=${current%%.*}
-          if [ "${major}" -lt 16 ]; then
-            candidate=$(ls -d /Applications/Xcode_1[6-9]*.app /Applications/Xcode_[2-9][0-9]*.app 2>/dev/null | sort -V | tail -1 || true)
+          if [ "${major}" -lt 26 ]; then
+            candidate=$(ls -d /Applications/Xcode_2[6-9]*.app /Applications/Xcode_[3-9][0-9]*.app 2>/dev/null | sort | tail -1 || true)
             if [ -z "${candidate}" ]; then
-              echo "::error::runner 上没有 Xcode 16+，而本工程用的是 objectVersion 77 的同步文件夹格式"
+              echo "::error::runner 上没有 Xcode 26+，无法编译系统原生 Liquid Glass 标签栏"
               exit 1
             fi
-            sudo xcode-select -s "${candidate}"
+            sudo xcode-select -s "${candidate}/Contents/Developer"
           fi
           xcodebuild -version
+          sdk=$(xcrun --sdk iphoneos --show-sdk-version)
+          sdk_major=${sdk%%.*}
+          if [ "${sdk_major}" -lt 26 ]; then
+            echo "::error::当前 iPhoneOS SDK 为 ${sdk}，原生 Liquid Glass 要求 SDK 26+"
+            exit 1
+          fi
+          echo "使用 iPhoneOS SDK ${sdk}"
 
       - name: 编译（关闭签名）
         run: |

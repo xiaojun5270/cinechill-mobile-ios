@@ -14,7 +14,7 @@ struct AutomationView: View {
                           systemImage: "bell.badge",
                           tint: .pink) { SubscriptionsView() }
                 ModuleRow(title: "MoviePilot",
-                          subtitle: "连接配置与订阅列表",
+                          subtitle: "连接、站点监控与订阅管理",
                           systemImage: "arrow.triangle.branch",
                           tint: .indigo) { MoviePilotView() }
             }
