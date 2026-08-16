@@ -4,6 +4,12 @@ import Foundation
 /// 这里从服务端配置接口里推断，避免用户在 App 内重复填写。
 enum EmbyConnection {
     static func load(api: CineChillAPI) async -> ConnectionRequest? {
+        // The web dashboard reads the 302 configuration, where Emby entries are
+        // stored under `embys`. Keep `/api/load` as a fallback for older servers.
+        let config302 = await Probe.json { try await api.config302.getConfig302() }
+        if let connection = connection(from: config302) {
+            return connection
+        }
         let config = await Probe.json { try await api.server.loadConfig() }
         return connection(from: config)
     }
@@ -17,7 +23,7 @@ enum EmbyConnection {
     }
 
     static func connection(from config: JSONValue) -> ConnectionRequest? {
-        var node = config.deepFirst(of: "emby", "emby_config", "media_server", "emby_servers")
+        var node = config.deepFirst(of: "embys", "emby", "emby_config", "media_server", "emby_servers")
         if let list = node.array { node = list.first ?? .null }
         let candidates = node.object != nil ? [node, config] : [config]
         for candidate in candidates {

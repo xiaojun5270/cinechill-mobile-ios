@@ -18,8 +18,9 @@ enum Artwork {
         if let api, let path = item.first(of: "poster_path", "posterPath").string, path.hasPrefix("/") {
             return try? api.discover.tmdbImageProxyURL(path: path)
         }
-        var raw = item.first(of: "poster", "cover", "image", "pic", "poster_url",
-                             "cover_url", "img", "image_url").displayString
+        var raw = item.first(of: "poster", "poster_url", "posterUrl", "poster_path", "posterPath",
+                             "cover", "cover_url", "coverUrl", "image", "image_url", "imageUrl",
+                             "pic", "img").displayString
         if raw == nil, let pic = item["pic"].object {
             raw = (pic["large"] ?? pic["normal"] ?? pic["medium"])?.string
         }
@@ -39,6 +40,17 @@ enum Artwork {
             return try? api?.discover.bangumiImageProxyURL(url: text)
         }
         return try? api?.discover.cachedConfiguredImageProxyURL(url: text)
+    }
+
+    /// Dashboard playback cards use a landscape backdrop when available.
+    static func backdropURL(for item: JSONValue, api: CineChillAPI?, session: AppSession) -> URL? {
+        let backdrop = item.first(of: "backdrop_url", "backdropUrl", "backdrop", "backdrop_path",
+                                 "backdropPath", "fanart_url", "fanartUrl", "fanart")
+        if let text = backdrop.displayString, !text.isEmpty {
+            if text.hasPrefix("/") { return session.absoluteURL(text) }
+            if text.hasPrefix("http") { return URL(string: text) }
+        }
+        return url(for: item, api: api, session: session)
     }
 }
 

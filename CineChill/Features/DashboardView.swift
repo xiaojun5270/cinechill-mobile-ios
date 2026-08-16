@@ -1,9 +1,19 @@
 import SwiftUI
+import Charts
+
+private struct DashboardTrendPoint: Identifiable {
+    let id: String
+    let label: String
+    let total: Int
+    let movie: Int
+    let series: Int
+}
 
 /// 仪表盘：媒体库总览、设备状态、115 账号、任务动态。
 /// 服务端未声明响应结构，因此所有取值都用候选键名兜底，并保留「原始数据」入口。
 struct DashboardView: View {
     @EnvironmentObject private var session: AppSession
+    @State private var trendDays = 7
 
     var body: some View {
         RemoteScroll(title: "仪表盘") {
@@ -13,22 +23,35 @@ struct DashboardView: View {
             let drive = await Probe.json { try await api.server.getDashboard115Account() }
             let progress = await Probe.json { try await api.tasks.getProgress() }
             let health = await Probe.json { try await api.health.getSystemHealth() }
+            let overview: JSONValue
+            if let connection = await EmbyConnection.load(api: api) {
+                overview = await Probe.json {
+                    try await api.server.getDashboardEmbyOverview(connection)
+                }
+            } else {
+                overview = .null
+            }
             return JSONValue.object([
                 "stats": stats,
                 "metrics": metrics,
                 "drive115": drive,
                 "progress": progress,
                 "health": health,
+                "overview": overview,
             ])
         } content: { value, reload in
             greeting
             FavoriteModulesCard()
-            libraryOverview(value["stats"])
+            let overview = value["overview"]
+            let mediaStats = overview["media_stats"].isNull ? value["stats"] : overview["media_stats"]
+            libraryOverview(mediaStats, overview: overview)
             deviceCard(value["metrics"])
             drive115Card(value["drive115"])
             taskCard(value["progress"])
-            librariesCard(value["stats"])
-            recentCard(value["stats"])
+            trendCard(overview)
+            continueWatchingCard(overview)
+            librariesCard(mediaStats)
+            recentCard(overview)
             rawCard(value, reload: reload)
         }
         .toolbar {
@@ -81,19 +104,53 @@ struct DashboardView: View {
     // MARK: - 媒体库总览
 
     @ViewBuilder
-    private func libraryOverview(_ stats: JSONValue) -> some View {
+    private func libraryOverview(_ stats: JSONValue, overview: JSONValue) -> some View {
         let movies = stats.deepFirst(of: "movie_count", "movies", "MovieCount", "total_movies")
         let series = stats.deepFirst(of: "series_count", "series", "SeriesCount", "tv_count", "shows")
-        let episodes = stats.deepFirst(of: "episode_count", "episodes", "EpisodeCount")
+        let episodes = stats.deepFirst(of: "episode_count", "episodes", "EpisodeCount", "total")
         let users = stats.deepFirst(of: "user_count", "users_count", "users", "UserCount")
+        let libraries = stats.list("libraries", "views", "library_list")
+        let classifiedLibraryCount = (stats["movie_libraries"].int ?? 0)
+            + (stats["series_libraries"].int ?? 0)
+            + (stats["other_libraries"].int ?? 0)
+        let libraryCount = libraries.count > 0
+            ? libraries.count
+            : stats.first(of: "library_count", "libraries").int ?? classifiedLibraryCount
+        let libraryLimit = overview.first(of: "library_limit", "max_libraries").int ?? 128
+        let online = overview.deepFirst(of: "online", "connected", "available").bool ?? true
+        let serverName = overview.first(of: "server_name", "serverName", "name").displayString ?? "Emby Server"
 
         if !stats.isNull {
-            CardSection(title: "媒体库总览", systemImage: "square.stack.3d.up") {
+            CardSection(title: "媒体库总览", systemImage: "square.stack.3d.up",
+                        trailing: AnyView(StatusBadge(online ? "\(serverName) 在线" : "\(serverName) 离线",
+                                                      tone: online ? .good : .bad))) {
                 LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 10) {
                     MetricTile(title: "电影", value: countText(movies), systemImage: "film", tone: .info)
                     MetricTile(title: "电视剧", value: countText(series), systemImage: "tv", tone: .good)
                     MetricTile(title: "剧集", value: countText(episodes), systemImage: "list.and.film", tone: .warning)
                     MetricTile(title: "用户", value: countText(users), systemImage: "person.2", tone: .neutral)
+                }
+                HStack(spacing: 12) {
+                    Label("Emby Server", systemImage: "server.rack")
+                    if let version = session.serverVersion {
+                        Label("CineChill v\(version)", systemImage: "movieclapper")
+                    }
+                    Label("\(libraryCount) 个媒体库", systemImage: "cylinder")
+                }
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                if libraryCount > 0 {
+                    HStack(spacing: 8) {
+                        Text(Fmt.percent(Double(libraryCount) / Double(max(libraryLimit, 1))))
+                            .font(.caption.monospacedDigit())
+                            .foregroundStyle(.green)
+                        ProgressView(value: min(Double(libraryCount) / Double(max(libraryLimit, 1)), 1))
+                            .tint(.green)
+                        Text("\(libraryCount) / \(libraryLimit)")
+                            .font(.caption.monospacedDigit())
+                            .foregroundStyle(.secondary)
+                    }
                 }
             }
         }
@@ -110,10 +167,11 @@ struct DashboardView: View {
     @ViewBuilder
     private func deviceCard(_ metrics: JSONValue) -> some View {
         if !metrics.isNull {
-            let cpu = metrics.deepFirst(of: "cpu")
-            let memory = metrics.deepFirst(of: "memory", "mem", "ram")
-            let disk = metrics.deepFirst(of: "disk", "storage")
-            let network = metrics.deepFirst(of: "network", "net")
+            let cpu = metrics.deepFirst(of: "cpu", "cpu_usage", "cpu_percent", "cpuUsage")
+            let memory = metrics.deepFirst(of: "memory", "mem", "ram", "memory_usage", "memory_percent")
+            let disk = metrics.deepFirst(of: "disk", "storage", "disk_usage", "disk_percent")
+            let networkNode = metrics.deepFirst(of: "network", "net", "network_io")
+            let network = networkNode.isNull ? metrics : networkNode
             let uptime = metrics.deepFirst(of: "uptime", "uptime_seconds", "boot_seconds")
 
             CardSection(title: "服务器状态", systemImage: "cpu",
@@ -132,10 +190,10 @@ struct DashboardView: View {
                              ratio: Fmt.ratio(ratioValue(disk)),
                              caption: usedTotalText(disk))
                     HStack {
-                        Label("上行 " + Fmt.speed(network.first(of: "upload", "up", "tx", "sent")),
+                        Label("上行 " + uploadSpeedText(network),
                               systemImage: "arrow.up")
                         Spacer()
-                        Label("下行 " + Fmt.speed(network.first(of: "download", "down", "rx", "recv")),
+                        Label("下行 " + downloadSpeedText(network),
                               systemImage: "arrow.down")
                     }
                     .font(.caption)
@@ -147,7 +205,13 @@ struct DashboardView: View {
 
     private func uptimeBadge(_ uptime: JSONValue) -> some View {
         Group {
-            if let seconds = uptime.double, seconds > 0 {
+            if let text = uptime.first(of: "text", "human", "display", "formatted").displayString,
+               !text.isEmpty {
+                StatusBadge("运行 " + text, tone: .good)
+            } else if let seconds = uptime.first(of: "seconds", "value", "total_seconds").double,
+                      seconds > 0 {
+                StatusBadge("运行 " + Fmt.duration(seconds: seconds), tone: .good)
+            } else if let seconds = uptime.double, seconds > 0 {
                 StatusBadge("运行 " + Fmt.duration(seconds: seconds), tone: .good)
             } else if let text = uptime.string, !text.isEmpty {
                 StatusBadge(text, tone: .good)
@@ -158,9 +222,22 @@ struct DashboardView: View {
     /// 兼容 `{percent: 66}`、`{usage: 0.66}` 与直接给数字两种形态。
     private func ratioValue(_ node: JSONValue) -> JSONValue {
         if node.object != nil {
-            return node.first(of: "percent", "percentage", "usage", "used_percent", "ratio", "load")
+            return node.first(of: "percent", "percentage", "usage", "used_percent", "usage_percent",
+                              "ratio", "load", "value")
         }
         return node
+    }
+
+    private func uploadSpeedText(_ network: JSONValue) -> String {
+        if let text = network.first(of: "up_human", "upload_human", "tx_human").displayString,
+           !text.isEmpty { return text }
+        return Fmt.speed(network.first(of: "upload", "up", "tx", "sent", "upload_bytes"))
+    }
+
+    private func downloadSpeedText(_ network: JSONValue) -> String {
+        if let text = network.first(of: "down_human", "download_human", "rx_human").displayString,
+           !text.isEmpty { return text }
+        return Fmt.speed(network.first(of: "download", "down", "rx", "recv", "download_bytes"))
     }
 
     private func usedTotalText(_ node: JSONValue) -> String {
@@ -209,10 +286,7 @@ struct DashboardView: View {
 
     @ViewBuilder
     private func taskCard(_ progress: JSONValue) -> some View {
-        let running = progress.list("running", "tasks").filter { item in
-            let status = item.first(of: "status", "state").string?.lowercased() ?? ""
-            return status.isEmpty || !["done", "finished", "completed", "idle"].contains(status)
-        }
+        let running = TaskWatch.items(from: progress).filter { !$0.isFinished }
         CardSection(title: "任务动态", systemImage: "bolt.horizontal") {
             VStack(alignment: .leading, spacing: 8) {
                 if running.isEmpty {
@@ -223,17 +297,17 @@ struct DashboardView: View {
                     ForEach(Array(running.prefix(5).enumerated()), id: \.offset) { _, item in
                         VStack(alignment: .leading, spacing: 4) {
                             HStack {
-                                Text(item.first(of: "name", "title", "task", "id").displayString ?? "任务")
+                                Text(item.name)
                                     .font(.subheadline)
                                 Spacer()
-                                StatusBadge(item.first(of: "status", "state").displayString ?? "运行中",
-                                            tone: badgeTone(for: item.first(of: "status", "state").string))
+                                StatusBadge(item.status.isEmpty ? "运行中" : item.status,
+                                            tone: item.status.isEmpty ? .good : badgeTone(for: item.status))
                             }
-                            if let percent = item.first(of: "percent", "progress", "ratio").double {
+                            if let percent = item.percent {
                                 ProgressView(value: Fmt.ratio(.double(percent)))
-                            }
-                            if let message = item.first(of: "message", "current", "detail").string {
-                                Text(message).font(.caption2).foregroundStyle(.secondary).lineLimit(2)
+                                Text(Fmt.percent(.double(percent), digits: 0))
+                                    .font(.caption2.monospacedDigit())
+                                    .foregroundStyle(.secondary)
                             }
                         }
                     }
@@ -247,6 +321,150 @@ struct DashboardView: View {
         }
     }
 
+    // MARK: - 入库趋势
+
+    @ViewBuilder
+    private func trendCard(_ overview: JSONValue) -> some View {
+        let points = trendPoints(overview, days: trendDays)
+        if !points.isEmpty {
+            CardSection(title: "入库趋势", systemImage: "chart.xyaxis.line",
+                        trailing: AnyView(
+                            Picker("趋势周期", selection: $trendDays) {
+                                Text("7天").tag(7)
+                                Text("30天").tag(30)
+                            }
+                            .pickerStyle(.segmented)
+                            .frame(width: 130)
+                        )) {
+                let total = points.reduce(0) { $0 + $1.total }
+                let movies = points.reduce(0) { $0 + $1.movie }
+                let series = points.reduce(0) { $0 + $1.series }
+                LazyVGrid(columns: Array(repeating: GridItem(.flexible()), count: 3), spacing: 8) {
+                    MetricTile(title: "全部", value: String(total), systemImage: "checklist", tone: .info)
+                    MetricTile(title: "电影", value: String(movies), systemImage: "film", tone: .good)
+                    MetricTile(title: "剧集", value: String(series), systemImage: "square.stack.3d.up", tone: .warning)
+                }
+                Chart(points) { point in
+                    AreaMark(
+                        x: .value("日期", point.label),
+                        y: .value("入库", point.total)
+                    )
+                    .interpolationMethod(.catmullRom)
+                    .foregroundStyle(Color.accentColor.opacity(0.12))
+
+                    LineMark(
+                        x: .value("日期", point.label),
+                        y: .value("入库", point.total)
+                    )
+                    .interpolationMethod(.catmullRom)
+                    .foregroundStyle(Color.accentColor)
+                    .symbol(Circle())
+                }
+                .frame(height: 150)
+                .chartYScale(domain: 0...max(points.map(\.total).max() ?? 0, 1))
+                .chartXAxis {
+                    AxisMarks(values: .automatic(desiredCount: min(points.count, 7)))
+                }
+            }
+        }
+    }
+
+    private func trendPoints(_ overview: JSONValue, days: Int) -> [DashboardTrendPoint] {
+        let rows = overview.deepFirst(of: "ingest_trend", "ingestTrend", "trend").array ?? []
+        let points = rows.enumerated().map { index, row in
+            let key = row.first(of: "date", "key", "day").displayString ?? String(index + 1)
+            let movie = row.first(of: "movie", "movie_count", "movieCount").int ?? 0
+            let series = row.first(of: "series", "series_count", "seriesCount").int ?? 0
+            let total = row.first(of: "total", "count", "all").int ?? movie + series
+            return DashboardTrendPoint(id: "\(key)-\(index)", label: trendLabel(key),
+                                       total: total, movie: movie, series: series)
+        }
+        return Array(points.suffix(max(days, 1)))
+    }
+
+    private func trendLabel(_ raw: String) -> String {
+        let parts = raw.split(separator: "-")
+        guard parts.count >= 3,
+              let month = Int(parts[parts.count - 2]),
+              let day = Int(parts[parts.count - 1].prefix(2)) else { return raw }
+        return "\(month)/\(day)"
+    }
+
+    // MARK: - 继续观看
+
+    @ViewBuilder
+    private func continueWatchingCard(_ overview: JSONValue) -> some View {
+        let playbacks = overview.deepFirst(of: "recent_playbacks", "recentPlaybacks",
+                                           "continue_watching", "continueWatching").array ?? []
+        if !playbacks.isEmpty {
+            CardSection(title: "继续观看", systemImage: "play.circle") {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(alignment: .top, spacing: 12) {
+                        ForEach(Array(playbacks.prefix(20).enumerated()), id: \.offset) { _, item in
+                            playbackLink(item)
+                        }
+                    }
+                    .padding(.vertical, 2)
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func playbackLink(_ item: JSONValue) -> some View {
+        if let destination = mediaWebURL(item) {
+            Link(destination: destination) { playbackCard(item) }
+                .buttonStyle(.plain)
+        } else {
+            playbackCard(item)
+        }
+    }
+
+    private func playbackCard(_ item: JSONValue) -> some View {
+        let width: CGFloat = 220
+        let ratio = playbackRatio(item)
+        return VStack(alignment: .leading, spacing: 6) {
+            RemoteImage(url: Artwork.backdropURL(for: item, api: session.api, session: session),
+                        placeholderIcon: "play.rectangle")
+                .frame(width: width, height: 124)
+                .clipShape(RoundedRectangle(cornerRadius: 8))
+                .overlay(alignment: .bottom) {
+                    ProgressView(value: ratio)
+                        .tint(.green)
+                        .padding(.horizontal, 8)
+                        .padding(.bottom, 6)
+                }
+            HStack(spacing: 6) {
+                Text(mediaTitle(item))
+                    .font(.caption.weight(.semibold))
+                    .lineLimit(1)
+                Spacer(minLength: 4)
+                Text(Fmt.percent(ratio, digits: 0))
+                    .font(.caption2.monospacedDigit())
+                    .foregroundStyle(.secondary)
+            }
+            .frame(width: width)
+            if let subtitle = mediaSubtitle(item) {
+                Text(subtitle)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .frame(width: width, alignment: .leading)
+            }
+        }
+    }
+
+    private func playbackRatio(_ item: JSONValue) -> Double {
+        let percent = item.first(of: "progress_percent", "played_percentage", "played_percent",
+                                 "playedPercentage", "progress", "percent")
+        if let value = percent.double { return Fmt.ratio(.double(value)) }
+        let position = item.first(of: "playback_position_ticks", "playbackPositionTicks",
+                                  "position_ticks", "positionTicks").double
+        let runtime = item.first(of: "runtime_ticks", "runtimeTicks", "run_time_ticks").double
+        guard let position, let runtime, runtime > 0 else { return 0 }
+        return min(max(position / runtime, 0), 1)
+    }
+
     // MARK: - 媒体库明细
 
     @ViewBuilder
@@ -257,12 +475,17 @@ struct DashboardView: View {
                 VStack(spacing: 6) {
                     ForEach(Array(libraries.prefix(20).enumerated()), id: \.offset) { _, item in
                         HStack {
-                            Text(item.first(of: "name", "Name", "title").displayString ?? "—")
+                            Label(item.first(of: "name", "Name", "title").displayString
+                                  ?? item.displayString ?? "—",
+                                  systemImage: libraryIcon(item))
                                 .font(.subheadline)
                             Spacer()
-                            Text(countText(item.first(of: "count", "total", "item_count", "ItemCount")) + " 部")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
+                            let count = item.first(of: "count", "total", "item_count", "ItemCount")
+                            if !count.isNull {
+                                Text(countText(count) + " 部")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
                         }
                     }
                 }
@@ -273,24 +496,84 @@ struct DashboardView: View {
     // MARK: - 最近入库
 
     @ViewBuilder
-    private func recentCard(_ stats: JSONValue) -> some View {
-        let recent = stats.deepFirst(of: "recent_items", "recently_added", "latest", "recent").array ?? []
+    private func recentCard(_ overview: JSONValue) -> some View {
+        let recent = overview.deepFirst(of: "recent_items", "recentItems", "recently_added",
+                                        "recentlyAdded", "latest", "recent").array ?? []
         if !recent.isEmpty {
             CardSection(title: "最近入库", systemImage: "clock.arrow.circlepath") {
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(alignment: .top, spacing: 12) {
                         ForEach(Array(recent.prefix(24).enumerated()), id: \.offset) { _, item in
-                            PosterCard(
-                                title: item.first(of: "name", "title", "Name").displayString ?? "—",
-                                subtitle: item.first(of: "year", "ProductionYear", "sub", "episode").displayString,
-                                url: session.absoluteURL(
-                                    item.first(of: "poster", "image", "cover", "poster_url", "img").string))
+                            recentItemLink(item)
                         }
                     }
                     .padding(.vertical, 2)
                 }
             }
         }
+    }
+
+    @ViewBuilder
+    private func recentItemLink(_ item: JSONValue) -> some View {
+        let poster = PosterCard(title: mediaTitle(item), subtitle: mediaSubtitle(item),
+                                badge: mediaTypeLabel(item),
+                                url: Artwork.url(for: item, api: session.api, session: session))
+        if let destination = mediaWebURL(item) {
+            Link(destination: destination) { poster }
+                .buttonStyle(.plain)
+        } else {
+            poster
+        }
+    }
+
+    private func mediaTitle(_ item: JSONValue) -> String {
+        item.first(of: "title", "name", "Name", "series_name", "seriesName").displayString ?? "—"
+    }
+
+    private func mediaSubtitle(_ item: JSONValue) -> String? {
+        var values: [String] = []
+        if let year = item.first(of: "year", "ProductionYear", "production_year").displayString,
+           !year.isEmpty { values.append(year) }
+        if let label = item.first(of: "episode_label", "episodeLabel", "sub").displayString,
+           !label.isEmpty {
+            values.append(label)
+        } else {
+            let season = item.first(of: "season", "season_number", "seasonNumber").int
+            let episode = item.first(of: "episode", "episode_number", "episodeNumber").int
+            if let season, let episode {
+                values.append(String(format: "S%02dE%02d", season, episode))
+            } else if let episode {
+                values.append("第 \(episode) 集")
+            }
+        }
+        return values.isEmpty ? nil : values.joined(separator: " · ")
+    }
+
+    private func mediaTypeLabel(_ item: JSONValue) -> String? {
+        guard let type = item.first(of: "media_type", "mediaType", "type", "Type").displayString else {
+            return nil
+        }
+        switch type.lowercased() {
+        case "movie": return "电影"
+        case "series", "tv", "show": return "电视剧"
+        case "episode": return "剧集"
+        default: return type
+        }
+    }
+
+    private func libraryIcon(_ item: JSONValue) -> String {
+        switch item.first(of: "type", "collection_type", "CollectionType").displayString?.lowercased() {
+        case "movie", "movies": return "film"
+        case "series", "tv", "tvshows": return "tv"
+        default: return "rectangle.stack"
+        }
+    }
+
+    private func mediaWebURL(_ item: JSONValue) -> URL? {
+        guard let raw = item.first(of: "web_url", "webUrl", "url", "href").displayString,
+              !raw.isEmpty else { return nil }
+        if raw.hasPrefix("/") { return session.absoluteURL(raw) }
+        return URL(string: raw)
     }
 
     // MARK: - 原始数据
@@ -307,6 +590,16 @@ struct DashboardView: View {
                     JSONRawScreen(value: value["metrics"], title: "device_metrics")
                 } label: {
                     Label("device_metrics 原始数据", systemImage: "curlybraces")
+                }
+                NavigationLink {
+                    JSONRawScreen(value: value["overview"], title: "dashboard_emby_overview")
+                } label: {
+                    Label("emby_overview 原始数据", systemImage: "curlybraces")
+                }
+                NavigationLink {
+                    JSONRawScreen(value: value["progress"], title: "progress")
+                } label: {
+                    Label("progress 原始数据", systemImage: "curlybraces")
                 }
                 NavigationLink {
                     SystemHealthView()
