@@ -230,12 +230,12 @@ public final class ActionRunner: ObservableObject {
                 lastResult = result
                 if result.isSuccessFlag == false {
                     alertIsError = true
-                    alertText = result.errorMessage ?? "操作未成功"
+                    alertText = result.errorMessage ?? "操作未成功（服务端未提供错误原因）"
                 } else {
                     alertIsError = false
                     if let successText { alertText = successText }
+                    await onSuccess?()
                 }
-                await onSuccess?()
             } catch {
                 isRunning = false
                 alertIsError = true

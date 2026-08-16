@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// RSS 模块入口：任务、全局配置、链接生成器、预览。
+/// 真实库（RSS）模块入口：任务、全局配置、链接生成器、预览。
 struct RSSView: View {
     var body: some View {
         List {
@@ -25,7 +25,7 @@ struct RSSView: View {
                           tint: .teal) { RSSPreviewView() }
             }
         }
-        .navigationTitle("RSS 订阅")
+        .navigationTitle("真实库")
     }
 }
 

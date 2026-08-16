@@ -8,7 +8,7 @@
 
 在 Mac 上打开 `CineChill.xcodeproj` 后，选中 `CineChill` target，在 Signing & Capabilities 里换成你自己的开发团队（Bundle ID 默认是 `com.cinechill.mobile`，可自行修改），然后选真机或模拟器运行即可。部署目标是 iOS 17.0，Swift 语言版本 5，iPhone 与 iPad 通用。App 图标是脚本生成的纯色渐变胶片图形，`AppIcon.appiconset` 里放了 1024×1024 的浅色、深色与 tinted 三套单尺寸图（iOS 17 的单一尺寸规范），启动屏用 `Info.plist` 的 `UILaunchScreen` 配合 `LaunchBackground` 颜色与 `LaunchLogo` 图片，不需要 storyboard。想换成自己的图，替换 `Assets.xcassets` 里的同名文件即可。
 
-需要特别说明的是，本机是 Windows + Linux 容器环境，没有 Swift 工具链，所以代码是靠约束写法加脚本静态校验写出来的：所有 API 调用点、模型初始化参数标签、复用组件签名都用脚本逐一比对过生成代码，检查项包括括号配平、重复类型声明、`api.<分组>.<方法>` 是否存在、99 个请求模型的参数标签是否匹配、`session.` 与 `Fmt.` 成员是否存在、是否有声明了却没被引用的视图、ViewBuilder 单块子视图是否超过 10 个上限、功能索引里 82 个条目的 id 唯一性与目标视图是否真实存在，以及每个索引入口是否真的能无参构造。真正的编译验证交给 GitHub Actions；工作流会强制检查 Xcode 与 iPhoneOS SDK 26 以上，避免用旧 SDK 产出没有系统 Liquid Glass 的 IPA。
+需要特别说明的是，本机是 Windows + Linux 容器环境，没有 Swift 工具链，所以代码是靠约束写法加脚本静态校验写出来的：所有 API 调用点、模型初始化参数标签、复用组件签名都用脚本逐一比对过生成代码，检查项包括括号配平、重复类型声明、`api.<分组>.<方法>` 是否存在、99 个请求模型的参数标签是否匹配、`session.` 与 `Fmt.` 成员是否存在、是否有声明了却没被引用的视图、ViewBuilder 单块子视图是否超过 10 个上限、功能索引里 85 个条目的 id 唯一性与目标视图是否真实存在，以及每个索引入口是否真的能无参构造。真正的编译验证交给 GitHub Actions；工作流会强制检查 Xcode 与 iPhoneOS SDK 26 以上，避免用旧 SDK 产出没有系统 Liquid Glass 的 IPA。
 
 ## 架构
 
@@ -16,7 +16,7 @@
 
 `CineChill/API/` 是从 OpenAPI 生成的客户端：27 个分组文件、300 个方法，覆盖规格里全部 303 个操作中的 300 个——剩下 3 个是 Web 后台自己的静态页面（`/`、`/index.html`、`/login.html`），原生客户端不需要。`Models1/2/3.swift` 是 99 个请求模型，字段名与 snake_case 的 JSON 键通过 `CodingKeys` 映射。
 
-因为规格里 303 个操作的 200 响应**全部没有声明 schema**，响应侧没有生成模型，而是统一用 `Core/JSONValue.swift` 承载。它提供 `first(of:)`、`deepFirst(of:)`、`list(_:)`、`displayString` 等防御式取值方法，界面按「多个可能的键名」依次尝试，服务端字段命名有出入时不会崩，只会显示为空。每个页面都放了「原始数据」入口，可以直接看接口返回的完整 JSON，字段对不上时便于当场核对。
+因为规格里 303 个操作的 200 响应**全部没有声明 schema**，响应侧没有生成模型，而是统一用 `Core/JSONValue.swift` 承载。它提供 `first(of:)`、`deepFirst(of:)`、`list(_:)`、`displayString` 等防御式取值方法，界面按「多个可能的键名」依次尝试，服务端字段命名有出入时不会崩，只会显示为空。Release 界面只呈现业务字段；接口响应入口仅保留在调试构建和专用诊断页面中。
 
 `CineChill/UI/` 是共用组件：`RemoteList` / `RemoteScroll` 负责加载态、失败重试与下拉刷新；`ActionRunner` + `.actionFeedback` 负责写操作的进行中状态与结果提示；`SSEStreamView` 负责所有 SSE 长连接页面；`JSONObjectEditor`、`JSONConfigScreen` 把「服务端返回什么就编辑什么」的配置类接口做成通用表单，未知字段也能改；`KeyValueRow`、`StatusBadge`、`MetricTile`、`PosterCard`、`ModuleRow`、`RemoteImage` 等负责统一视觉。
 
@@ -24,7 +24,7 @@
 
 ## 界面组织
 
-底部五个 Tab。首页是仪表盘，聚合服务器状态、设备指标、115 账号、任务进度与整理统计。发现页是海报网格加分页，左上角进入「浏览发现」（数据源与类型筛选、TMDb Discover、豆瓣→TMDb 匹配、批量海报、删除 Emby 条目），右上角是搜索。媒体库页汇总 Emby 总览与用户、Emby 任务中心、Emby 搜索、媒体整理与整理记录、二级分类规则、转存历史、缺集统计。自动化页覆盖 RSS、订阅、115 上传与清理、秒传转存、STRM、Webhook / 飞牛签到、爱影转发、Docker 管理。设置页包含服务器管理、302 配置、通知、AI 助手、资源与主题、系统健康、任务中心与系统日志、升级与关于。
+底部五个 Tab。首页是仪表盘，聚合服务器状态、设备指标、115 账号、任务进度与整理统计。发现页是海报网格加分页，左上角进入「浏览发现」（数据源与类型筛选、TMDb Discover、豆瓣→TMDb 匹配、批量海报、删除 Emby 条目），右上角是搜索。媒体库页集中发现推荐、缺集统计、订阅系统、站点管理及 Emby 库管理；自动化页分为媒体整理、任务与运维、115 网盘及资源集成，其中真实库对应 RSS 硬链接任务，工具箱聚合 115、转存、Webhook、Telegram、MoviePilot、代理与 TMDB 工具。设置页提供日间、夜间、跟随系统三态外观，以及服务器配置、通知配置、账户管理、AI 助手和本机设置。
 
 按 API 分组看，Discover(40)、RSS(22)、Notify(21)、Drive115Upload(21)、DockerManager(20)、AIEpisodeResolver(17)、Resources(16)、media_organize(14)、Server(13)、Tasks(13)、ForwardAiying(13)、config_302(11)、OrganizeHistory(10)、EmbyUsers(10)、MoviePilot(7)、Drive115Cleanup(7)、Subscriptions(7)、strm(6)、SystemHealth(5)、EmbyTasks(5)、FnosSign(5)、Auth(4)、Webhook(4)、Transfer(3)、Upgrade(3)、public(2) 均有对应界面入口。300 个方法中 297 个在界面里被实际调用，剩下 3 个是设计上不该由手机端调用的：`wechatCallbackVerify` 与 `wechatCallbackMessage` 是企业微信回调服务端的被动接口；`embyCoverProxyURL` 需要服务端用 HMAC 算出的 `ts` 与 `sig`，接口文档里明确写的是「供企业微信等外部服务抓取」，客户端无法也不应自己签名。
 
@@ -34,7 +34,7 @@
 
 Web 后台没有、但手机上很需要的几件事，都做在了 `App/ModuleIndex.swift` 与 `Core/` 里。
 
-**全局功能搜索与收藏。**82 个二级页面登记在 `ModuleIndex` 里，每条记录带标题、所属分组、所属 Tab、图标、以及包含接口路径的关键词（例如搜 `/api/rss` 或搜「秒传」都能命中）。仪表盘右上角的放大镜、设置页「这台设备 → 全部功能」都进得去，搜索框支持空格分词的 AND 匹配。列表里左滑或长按任意页面即可收藏，收藏与最近访问（最多 8 条）会出现在仪表盘顶部的「常用」卡片和 iPad 侧边栏里，存在 `UserDefaults` 的 `modules.favorites` / `modules.recents`。
+**全局功能搜索与收藏。**85 个二级页面登记在 `ModuleIndex` 里，每条记录带标题、所属分组、所属 Tab、图标、以及包含接口路径的关键词（例如搜 `/api/rss` 或搜「秒传」都能命中）。仪表盘右上角的放大镜可进入全部功能，搜索框支持空格分词的 AND 匹配。列表里左滑或长按任意页面即可收藏，收藏与最近访问（最多 8 条）会出现在仪表盘顶部的「常用」卡片和 iPad 侧边栏里，存在 `UserDefaults` 的 `modules.favorites` / `modules.recents`。
 
 **iPad 分栏布局。**`MainTabView` 按 `horizontalSizeClass` 分流：紧凑宽度走原来的五个 Tab，regular 宽度（iPad 全屏、以及 iPad 分屏较宽的一侧）走 `NavigationSplitView`，左栏是五个模块加收藏页，右栏是独立的 `NavigationStack`。切换左栏条目时用 `.id(selection)` 重建右栏导航栈，避免上一个模块的详情页留在右侧。
 
@@ -72,7 +72,7 @@ Web 后台没有、但手机上很需要的几件事，都做在了 `App/ModuleI
 
 ## 已知限制
 
-响应结构未知是最大的不确定性来源：所有列表页都做了多键名兜底，但如果服务端某个接口返回的字段名不在候选里，页面会显示为空而不是报错，此时请点开「原始数据」查看真实字段，再调整对应 `first(of:)` 的候选键。
+响应结构未知是最大的不确定性来源：所有列表页都做了多键名兜底，但如果服务端某个接口返回的字段名不在候选里，页面会显示为空而不是报错。此时可从仪表盘运行完整接口诊断，再按实际响应调整对应 `first(of:)` 的候选键。
 
 少数接口在 OpenAPI 里请求体是自由对象（`additionalProperties: true`），Web 后台的调用代码又没在快照里，只能按常见命名推测：批量海报（`/api/discover/tmdb_artwork/batch`）同时提交 `items` 与 `tmdb_ids`，删除 Emby 条目（`/api/discover/emby/items/delete`）同时提交 `item_ids` 与 `ids`，重做整理记录提交 `history_ids` / `reason` / `recognition_identity`，二级分类保存直接回传编辑后的对象。这几个页面都把实际提交的请求体展示在「调试」区，跟服务端日志比对后按需调整键名即可。
 

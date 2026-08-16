@@ -48,11 +48,6 @@ struct CategoryRulesView: View {
                     } label: {
                         Label("载入默认规则（不自动保存）", systemImage: "arrow.counterclockwise")
                     }
-                    NavigationLink {
-                        JSONRawScreen(value: draft, title: "当前规则")
-                    } label: {
-                        Label("查看原始 JSON", systemImage: "curlybraces")
-                    }
                 }
             }
         }

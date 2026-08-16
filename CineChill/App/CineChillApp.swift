@@ -6,6 +6,7 @@ struct CineChillApp: App {
     @StateObject private var lock = AppLock()
     @StateObject private var favorites = ModuleFavorites()
     @StateObject private var notifier = TaskNotifier()
+    @AppStorage(appColorModeKey) private var colorModeRaw = AppColorMode.system.rawValue
 
     init() {
         // 导航栏 / 标签栏材质要在第一个栏创建之前装好
@@ -23,6 +24,9 @@ struct CineChillApp: App {
             .environmentObject(lock)
             .environmentObject(favorites)
             .environmentObject(notifier)
+            .preferredColorScheme(
+                (AppColorMode(rawValue: colorModeRaw) ?? .system).colorScheme
+            )
             .task {
                 await notifier.pollWhileActive(session: session)
             }

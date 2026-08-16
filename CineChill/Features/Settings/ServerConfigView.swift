@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// 服务端参数：config.json 概览、代理测试、原始编辑、重启。
+/// 服务端参数：config.json 概览、代理测试、高级编辑、重启。
 struct ServerConfigView: View {
     @EnvironmentObject private var session: AppSession
     @StateObject private var runner = ActionRunner()
@@ -42,7 +42,7 @@ struct ServerConfigView: View {
             } header: {
                 Text("网络代理")
             } footer: {
-                Text("留空的代理不会被保存，这里只做连通性检测；正式生效需要在原始配置中写入代理字段。")
+                Text("留空的代理不会被保存，这里只做连通性检测；正式生效需要在高级配置中写入代理字段。")
             }
 
             Section("全部字段") {
@@ -52,9 +52,9 @@ struct ServerConfigView: View {
 
             Section {
                 NavigationLink {
-                    ServerRawConfigView()
+                    ServerAdvancedConfigView()
                 } label: {
-                    Label("原始配置编辑", systemImage: "curlybraces")
+                    Label("高级配置", systemImage: "slider.horizontal.3")
                 }
                 Button {
                     confirmRestart = true
@@ -64,7 +64,7 @@ struct ServerConfigView: View {
                 .foregroundStyle(.red)
                 JSONInspector(value: value)
             } footer: {
-                Text("重启会中断正在进行的整理、同步与上传任务，App 需要重新连接。字段的实际修改请在原始配置页面完成。")
+                Text("重启会中断正在进行的整理、同步与上传任务，App 需要重新连接。字段修改请在高级配置页面完成。")
             }
             .confirmationDialog("重启服务端？", isPresented: $confirmRestart, titleVisibility: .visible) {
                 Button("重启", role: .destructive) {
@@ -87,13 +87,13 @@ struct ServerConfigView: View {
     }
 }
 
-/// 服务端 config.json 原始编辑。
-struct ServerRawConfigView: View {
+/// 服务端 config.json 全量高级编辑。
+struct ServerAdvancedConfigView: View {
     @EnvironmentObject private var session: AppSession
 
     var body: some View {
         JSONConfigScreen(
-            title: "服务端原始配置",
+            title: "服务端高级配置",
             note: "对应 Web 后台的 config.json。保存会整体覆盖服务端配置，请先确认字段无误。",
             unwrapKeys: ["config", "data", "settings"],
             load: {

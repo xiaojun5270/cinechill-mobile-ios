@@ -174,9 +174,6 @@ struct OrganizeRecordDetailView: View {
                 }
             }
 
-            Section("原始数据") {
-                JSONFieldList(value: record)
-            }
         }
         .navigationTitle(record.first(of: "title", "name").displayString ?? "记录")
         .actionFeedback(runner)

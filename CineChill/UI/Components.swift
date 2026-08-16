@@ -349,8 +349,7 @@ public struct JSONRawScreen: View {
     }
 }
 
-/// 列表里的「原始数据」入口行，点击后推入整页 JSON。
-/// 直接把 `JSONRawScreen` 塞进 List 行会造成嵌套滚动视图，所以统一走这个入口。
+/// 调试构建里的接口响应入口。Release 界面只展示业务字段，不暴露服务端 JSON。
 public struct JSONInspector: View {
     let value: JSONValue
     var title: String = "原始数据"
@@ -361,11 +360,15 @@ public struct JSONInspector: View {
     }
 
     public var body: some View {
+#if DEBUG
         NavigationLink {
             JSONRawScreen(value: value, title: title)
         } label: {
             Label(title, systemImage: "curlybraces")
         }
+#else
+        EmptyView()
+#endif
     }
 }
 

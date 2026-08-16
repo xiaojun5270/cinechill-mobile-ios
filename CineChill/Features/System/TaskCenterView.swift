@@ -1,3 +1,4 @@
+import Foundation
 import SwiftUI
 
 /// 任务中心：运行进度 + 已保存的海报/主题任务。
@@ -233,7 +234,8 @@ struct TaskEditorView: View {
         _name = State(initialValue: existing.first(of: "name", "title").displayString ?? "")
         _cron = State(initialValue: existing.first(of: "cron", "schedule").displayString ?? "0 4 * * *")
         _preset = State(initialValue: existing.first(of: "preset_filename", "preset").displayString ?? "")
-        _mode = State(initialValue: existing.first(of: "mode").displayString ?? "random")
+        let savedMode = existing.first(of: "mode").displayString ?? "random"
+        _mode = State(initialValue: savedMode == "latest" || savedMode == "sequential" ? "latest" : "random")
         _enabled = State(initialValue: existing.first(of: "enabled", "is_enabled").bool ?? true)
         _autoInclude = State(initialValue: existing.first(of: "auto_include_new_libraries").bool ?? false)
         let ids = existing.list("targets", "libraries").compactMap {
@@ -272,7 +274,7 @@ struct TaskEditorView: View {
             Text(Fmt.cron(cron)).font(.caption).foregroundStyle(.secondary)
             Picker("取图方式", selection: $mode) {
                 Text("随机").tag("random")
-                Text("顺序").tag("sequential")
+                Text("最新入库").tag("latest")
             }
             .pickerStyle(.segmented)
             Toggle("启用", isOn: $enabled)
@@ -349,7 +351,7 @@ struct TaskEditorView: View {
                 JSONInspector(value: runner.lastResult, title: "接口返回")
             }
         } footer: {
-            Text("已选择 \(targets().count) 个媒体库。目标会带上服务端配置里的 Emby 地址与密钥一起提交。")
+            Text("已选择 \(targets().count) 个媒体库。保存格式与 Web 端任务配置一致。")
         }
     }
 
@@ -407,10 +409,7 @@ struct TaskEditorView: View {
     private func target(id: String, name: String) -> TaskTarget {
         TaskTarget(serverIdx: 0,
                    libraryId: id,
-                   libraryName: name,
-                   url: connection?.url,
-                   key: connection?.key,
-                   publicHost: connection?.publicHost)
+                   libraryName: name)
     }
 
     private func save() {
@@ -459,35 +458,41 @@ struct TaskEditorView: View {
 struct SystemLogsView: View {
     @EnvironmentObject private var session: AppSession
     @StateObject private var runner = ActionRunner()
-    @State private var level = ""
+    @State private var level = "ALL"
     @State private var keyword = ""
-    @State private var hideDebug = true
+    @State private var hideDebug = false
     @State private var queryKey = 0
 
-    private let levels = ["", "ERROR", "WARNING", "INFO"]
+    private let levels = ["ALL", "ERROR", "WARNING", "INFO", "DEBUG"]
 
     var body: some View {
         RemoteList(title: "系统日志") {
             let api = try session.requireAPI()
             return try await api.tasks.getSystemLogs(
-                level: level.isEmpty ? nil : level,
+                level: level,
                 keyword: keyword.isEmpty ? nil : keyword,
-                category: nil,
-                limit: 300,
+                category: "ALL",
+                limit: 1000,
                 hideDebug: hideDebug)
         } content: { value, reload in
             Section("过滤") {
                 Picker("级别", selection: $level) {
-                    ForEach(levels, id: \.self) { Text($0.isEmpty ? "全部" : $0).tag($0) }
+                    ForEach(levels, id: \.self) { Text($0 == "ALL" ? "全部" : $0).tag($0) }
                 }
-                .onChange(of: level) { _, _ in queryKey += 1 }
+                .onChange(of: level) { _, newValue in
+                    if newValue == "DEBUG" { hideDebug = false }
+                    queryKey += 1
+                }
                 Toggle("隐藏 DEBUG", isOn: $hideDebug)
+                    .disabled(level == "DEBUG")
                     .onChange(of: hideDebug) { _, _ in queryKey += 1 }
             }
-            let logs = value.list("logs", "lines", "items")
-            if logs.isEmpty { EmptyRow("没有日志") }
-            ForEach(Array(logs.enumerated()), id: \.offset) { _, log in
-                logRow(log)
+            let logs = SystemLogPayload.entries(from: value)
+            Section("日志（\(logs.count)）") {
+                if logs.isEmpty { EmptyRow("服务端没有返回符合条件的日志") }
+                ForEach(Array(logs.enumerated()), id: \.offset) { _, log in
+                    logRow(log)
+                }
             }
             Section {
                 NavigationLink {
@@ -634,15 +639,20 @@ struct SystemLogsLiveView: View {
         errorText = nil
         do {
             let api = try session.requireAPI()
+            let latestID = await loadSnapshot(api: api)
             let request = try api.tasks.streamSystemLogsRequest(
-                level: level.isEmpty ? nil : level,
+                level: level,
                 keyword: keyword.isEmpty ? nil : keyword,
-                category: nil,
-                lastEventId: nil,
+                category: "ALL",
+                lastEventId: latestID,
                 hideDebug: hideDebug)
             isConnected = true
             for try await event in EventStream.events(client: api.client, request: request) {
                 if let name = event.event, name == "ping" || name == "heartbeat" { continue }
+                if event.event == "reset" {
+                    _ = await loadSnapshot(api: api)
+                    continue
+                }
                 append(event.json)
             }
             isConnected = false
@@ -658,13 +668,31 @@ struct SystemLogsLiveView: View {
 
     /// 一条事件可能是单条日志、也可能是一批日志。
     private func append(_ value: JSONValue) {
-        let batch = value.list("logs", "lines", "items", "events")
-        let payloads = batch.isEmpty ? [value] : batch
-        for payload in payloads {
+        for payload in SystemLogPayload.entries(from: value) {
             guard let line = makeLine(payload) else { continue }
             lines.append(line)
         }
         if lines.count > 1000 { lines.removeFirst(lines.count - 1000) }
+    }
+
+    /// 先取一次完整快照，再从 latest_id 后继续接收 SSE，避免进入实时页时只看到新日志。
+    private func loadSnapshot(api: CineChillAPI) async -> Int? {
+        do {
+            let value = try await api.tasks.getSystemLogs(
+                level: level,
+                keyword: keyword.isEmpty ? nil : keyword,
+                category: "ALL",
+                limit: 1000,
+                hideDebug: hideDebug)
+            lines = SystemLogPayload.entries(from: value).compactMap { makeLine($0) }
+            return value.first(of: "latest_id", "latestId", "last_event_id").int
+        } catch let error as APIError {
+            if error.isAuthFailure { session.handle(error: error) }
+            errorText = error.errorDescription ?? "系统日志读取失败"
+        } catch {
+            errorText = error.localizedDescription
+        }
+        return nil
     }
 
     private func makeLine(_ payload: JSONValue) -> LiveLine? {
@@ -687,5 +715,35 @@ struct SystemLogsLiveView: View {
             return candidate
         }
         return "INFO"
+    }
+}
+
+/// v73 的日志快照和 SSE 都以文本块返回；旧服务端也可能返回结构化数组。
+private enum SystemLogPayload {
+    static func entries(from value: JSONValue) -> [JSONValue] {
+        if let items = value.array { return items }
+
+        for key in ["logs", "lines", "items", "events"] {
+            if let items = value[key].array { return items }
+        }
+
+        if let raw = textBlock(in: value) {
+            return raw.components(separatedBy: .newlines)
+                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                .filter { !$0.isEmpty }
+                .map { .string($0) }
+        }
+        if value.first(of: "message", "msg", "line").displayString != nil {
+            return [value]
+        }
+        return []
+    }
+
+    private static func textBlock(in value: JSONValue) -> String? {
+        if let text = value.string { return text }
+        for key in ["logs", "chunk", "content", "text", "data", "raw"] {
+            if let text = value[key].string { return text }
+        }
+        return nil
     }
 }

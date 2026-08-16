@@ -49,6 +49,41 @@ public enum ChromeStyle: String, CaseIterable, Identifiable {
 /// 放在文件作用域，`@AppStorage` 的默认值表达式在非隔离上下文里求值，不宜引用 `@MainActor` 类型的成员。
 let chromeStyleKey = "appearance.chromeStyle"
 
+/// App 明暗模式，与 Web 的日间 / 夜间 / 跟随系统三态保持一致。
+public enum AppColorMode: String, CaseIterable, Identifiable {
+    case light
+    case dark
+    case system
+
+    public var id: String { rawValue }
+
+    public var title: String {
+        switch self {
+        case .light: return "日间"
+        case .dark: return "夜间"
+        case .system: return "跟随系统"
+        }
+    }
+
+    public var systemImage: String {
+        switch self {
+        case .light: return "sun.max"
+        case .dark: return "moon"
+        case .system: return "display"
+        }
+    }
+
+    var colorScheme: ColorScheme? {
+        switch self {
+        case .light: return .light
+        case .dark: return .dark
+        case .system: return nil
+        }
+    }
+}
+
+let appColorModeKey = "appearance.colorMode"
+
 @MainActor
 public enum GlassChrome {
 
@@ -271,11 +306,23 @@ struct GlassCapsule<Content: View>: View {
 /// 外观设置：导航栏材质。
 struct AppearanceView: View {
     @AppStorage(chromeStyleKey) private var raw = ChromeStyle.liquidGlass.rawValue
+    @AppStorage(appColorModeKey) private var colorModeRaw = AppColorMode.system.rawValue
 
     private var style: ChromeStyle { ChromeStyle(rawValue: raw) ?? .liquidGlass }
 
     var body: some View {
         Form {
+            Section("明暗模式") {
+                Picker("明暗模式", selection: $colorModeRaw) {
+                    ForEach(AppColorMode.allCases) { option in
+                        Label(option.title, systemImage: option.systemImage)
+                            .tag(option.rawValue)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+            }
+
             Section {
                 ForEach(ChromeStyle.allCases) { option in
                     Button {

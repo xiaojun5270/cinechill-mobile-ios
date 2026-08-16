@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// 115 上传：任务、状态、并发设置。
+/// 115秒传：上传任务、状态、云端资源秒传与并发设置。
 struct Upload115View: View {
     @EnvironmentObject private var session: AppSession
     @StateObject private var runner = ActionRunner()
@@ -8,7 +8,7 @@ struct Upload115View: View {
     @State private var editing: UploadTaskDraft?
 
     var body: some View {
-        RemoteList(title: "115 上传") {
+        RemoteList(title: "115秒传") {
             let api = try session.requireAPI()
             let tasks = await Probe.json { try await api.upload115.getTasks() }
             let status = await Probe.json { try await api.upload115.getStatus() }

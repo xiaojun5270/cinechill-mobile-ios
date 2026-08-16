@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// 媒体整理：配置、识别测试、手动整理、维护动作。
+/// 一条龙菜单：整理策略、识别测试、手动整理与维护动作。
 struct MediaOrganizeView: View {
     @EnvironmentObject private var session: AppSession
     @StateObject private var runner = ActionRunner()
@@ -81,7 +81,7 @@ struct MediaOrganizeView: View {
                 Text("以上动作会直接作用于服务端与 Emby，执行后请在任务中心查看进度。")
             }
         }
-        .navigationTitle("媒体整理")
+        .navigationTitle("一条龙菜单")
         .actionFeedback(runner)
     }
 
@@ -111,6 +111,155 @@ struct OrganizeConfigView: View {
                 let api = try session.requireAPI()
                 return try await api.organize.saveConfigPreservingFields(edited)
             })
+    }
+}
+
+/// 只编辑 Web“重命名模板”对应的五个字段，保存时保留其余整理配置。
+struct RenameTemplateView: View {
+    @EnvironmentObject private var session: AppSession
+    @StateObject private var runner = ActionRunner()
+
+    @State private var phase: Phase = .loading
+    @State private var config: JSONValue = .null
+    @State private var defaults: JSONValue = .null
+    @State private var movieFolder = ""
+    @State private var movieFile = ""
+    @State private var tvFolder = ""
+    @State private var tvSeasonFolder = ""
+    @State private var tvEpisode = ""
+
+    private enum Phase: Equatable {
+        case loading
+        case ready
+        case failed(String)
+    }
+
+    private var canSave: Bool {
+        [movieFolder, movieFile, tvFolder, tvSeasonFolder, tvEpisode]
+            .allSatisfy { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+    }
+
+    var body: some View {
+        Form {
+            switch phase {
+            case .loading:
+                LoadingRow()
+            case .failed(let message):
+                FailureRow(message: message) { Task { await load() } }
+            case .ready:
+                Section("电影重命名") {
+                    templateField("电影目录", text: $movieFolder)
+                    templateField("电影文件名", text: $movieFile)
+                    Button("恢复电影默认模板") { restoreMovieDefaults() }
+                }
+
+                Section("剧集重命名") {
+                    templateField("剧集目录", text: $tvFolder)
+                    templateField("季目录", text: $tvSeasonFolder)
+                    templateField("剧集文件名", text: $tvEpisode)
+                    Button("恢复剧集默认模板") { restoreTVDefaults() }
+                }
+
+                Section {
+                    Button {
+                        save()
+                    } label: {
+                        Label("保存重命名模板", systemImage: "square.and.arrow.down")
+                    }
+                    .disabled(!canSave)
+                } footer: {
+                    Text("支持 {title}、{year}、{tmdb_id}、{season_episode} 等占位符。保存只更新模板字段，不会覆盖其他整理设置。")
+                }
+            }
+        }
+        .navigationTitle("重命名模板")
+        .actionFeedback(runner)
+        .task {
+            if phase == .loading { await load() }
+        }
+    }
+
+    private func templateField(_ title: String, text: Binding<String>) -> some View {
+        TextField(title, text: text, axis: .vertical)
+            .textInputAutocapitalization(.never)
+            .autocorrectionDisabled()
+            .font(.system(.body, design: .monospaced))
+            .lineLimit(2...4)
+    }
+
+    private func load() async {
+        phase = .loading
+        do {
+            let api = try session.requireAPI()
+            async let currentRequest = api.organize.getConfig()
+            async let defaultsRequest = api.organize.getDefaultConfig()
+            let (currentResponse, defaultsResponse) = try await (currentRequest, defaultsRequest)
+            config = Self.unwrap(currentResponse)
+            defaults = Self.unwrap(defaultsResponse)
+            applyCurrentValues()
+            phase = .ready
+        } catch let error as APIError {
+            if error.isAuthFailure { session.handle(error: error) }
+            phase = .failed(error.errorDescription ?? "加载失败")
+        } catch {
+            phase = .failed(error.localizedDescription)
+        }
+    }
+
+    private func applyCurrentValues() {
+        movieFolder = template("movie_folder_format", in: config,
+                               fallback: "{title} ({year}) {tmdb-{tmdb_id}}")
+        movieFile = template("movie_rename_format", in: config,
+                             fallback: "{title}.{year}.{resource_pix}.{video_encode}")
+        tvFolder = template("tv_folder_format", in: config,
+                            fallback: "{title} ({year}) {tmdb-{tmdb_id}}")
+        tvSeasonFolder = template("tv_season_folder_format", in: config,
+                                  fallback: "Season {season_num}")
+        tvEpisode = template("tv_episode_format", in: config,
+                             fallback: "{title}.{season_episode}.{resource_pix}.{video_encode}")
+    }
+
+    private func restoreMovieDefaults() {
+        movieFolder = template("movie_folder_format", in: defaults,
+                               fallback: "{title} ({year}) {tmdb-{tmdb_id}}")
+        movieFile = template("movie_rename_format", in: defaults,
+                             fallback: "{title}.{year}.{resource_pix}.{web_source}.{resource_type}.{resource_effect}.{video_encode}.{color_depth}.{video_effect}.{fps}.{audio_encode}-{resource_team}")
+    }
+
+    private func restoreTVDefaults() {
+        tvFolder = template("tv_folder_format", in: defaults,
+                            fallback: "{title} ({year}) {tmdb-{tmdb_id}}")
+        tvSeasonFolder = template("tv_season_folder_format", in: defaults,
+                                  fallback: "Season {season_num}")
+        tvEpisode = template("tv_episode_format", in: defaults,
+                             fallback: "{title}.{season_episode}.{year}.{resource_pix}.{web_source}.{resource_type}.{video_encode}.{color_depth}.{video_effect}.{fps}.{audio_encode}-{resource_team}")
+    }
+
+    private func save() {
+        var updated = config
+        updated["movie_folder_format"] = .string(movieFolder)
+        updated["movie_rename_format"] = .string(movieFile)
+        updated["tv_folder_format"] = .string(tvFolder)
+        updated["tv_season_folder_format"] = .string(tvSeasonFolder)
+        updated["tv_episode_format"] = .string(tvEpisode)
+        runner.run("重命名模板已保存", operation: {
+            let api = try session.requireAPI()
+            return try await api.organize.saveConfigPreservingFields(updated)
+        }, onSuccess: {
+            config = updated
+        })
+    }
+
+    private func template(_ key: String, in value: JSONValue, fallback: String) -> String {
+        guard let text = value[key].string, !text.isEmpty else { return fallback }
+        return text
+    }
+
+    private static func unwrap(_ value: JSONValue) -> JSONValue {
+        for key in ["config", "data", "settings"] where value[key].object != nil {
+            return value[key]
+        }
+        return value
     }
 }
 

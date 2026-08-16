@@ -389,11 +389,6 @@ public struct JSONConfigScreen: View {
                     } label: {
                         Label("保存配置", systemImage: "square.and.arrow.down")
                     }
-                    NavigationLink {
-                        JSONRawScreen(value: draft, title: "当前草稿")
-                    } label: {
-                        Label("查看原始 JSON", systemImage: "curlybraces")
-                    }
                 }
             }
         }

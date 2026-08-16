@@ -1,5 +1,221 @@
 import SwiftUI
 
+struct NotificationTypeDefinition: Identifiable, Hashable {
+    let id: String
+    let name: String
+    let description: String?
+}
+
+enum NotificationSettingsData {
+    private static let metadataKeys: Set<String> = [
+        "status", "message", "success", "ok", "detail", "error",
+        "data", "result", "payload", "types", "templates"
+    ]
+
+    static func typeDefinitions(from response: JSONValue) -> [NotificationTypeDefinition] {
+        let payload = unwrap(response, keys: ["types", "notification_types"])
+
+        if let items = payload.array {
+            return items.enumerated().compactMap { index, item in
+                let key = item.first(of: "key", "id", "type").displayString
+                    ?? item.string
+                    ?? (item.object == nil ? nil : String(index))
+                guard let key, !key.isEmpty else { return nil }
+                return NotificationTypeDefinition(
+                    id: key,
+                    name: item.first(of: "name", "label", "title").displayString
+                        ?? item.string
+                        ?? key,
+                    description: item.first(of: "description", "desc", "detail").displayString)
+            }
+        }
+
+        guard let object = payload.object else { return [] }
+        return object.keys
+            .filter { !metadataKeys.contains($0) }
+            .sorted()
+            .map { key in
+                let item = object[key] ?? .null
+                return NotificationTypeDefinition(
+                    id: key,
+                    name: item.first(of: "name", "label", "title").displayString
+                        ?? item.displayString
+                        ?? key,
+                    description: item.first(of: "description", "desc", "detail").displayString)
+            }
+    }
+
+    static func notifyTypeValues(config: JSONValue,
+                                 definitions: [NotificationTypeDefinition]) -> [String: Bool] {
+        let raw = config.deepFirst(of: "notify_types", "notification_types")
+        var values: [String: Bool] = [:]
+
+        if let object = raw.object {
+            for (key, value) in object {
+                if let enabled = value.bool { values[key] = enabled }
+            }
+        } else if let items = raw.array {
+            for item in items {
+                if let key = item.first(of: "key", "id", "type").displayString ?? item.string {
+                    values[key] = true
+                }
+            }
+        }
+
+        for definition in definitions where values[definition.id] == nil {
+            values[definition.id] = raw.array == nil
+        }
+        return values
+    }
+
+    static func notifyTypeJSON(_ values: [String: Bool]) -> JSONValue {
+        .object(values.mapValues { .bool($0) })
+    }
+
+    static func templateObject(from response: JSONValue) -> JSONValue {
+        let payload = unwrap(response, keys: ["templates", "default_templates"])
+        guard let object = payload.object else { return .object([:]) }
+        return .object(object.filter { !metadataKeys.contains($0.key) })
+    }
+
+    static func configTemplates(from config: JSONValue) -> JSONValue {
+        templateObject(from: config.deepFirst(of: "templates"))
+    }
+
+    static func mergedTemplates(defaults: JSONValue, custom: JSONValue) -> JSONValue {
+        var merged = defaults.object ?? [:]
+        for (key, customTemplate) in custom.object ?? [:] {
+            if var fields = merged[key]?.object, let customFields = customTemplate.object {
+                fields.merge(customFields) { _, new in new }
+                merged[key] = .object(fields)
+            } else {
+                merged[key] = customTemplate
+            }
+        }
+        return .object(merged)
+    }
+
+    static func templateKeys(_ templates: JSONValue, defaults: JSONValue) -> [String] {
+        let preferred = ["media_added", "playback", "organize_complete", "wash_result", "task_complete"]
+        let all = Set((templates.object ?? [:]).keys).union((defaults.object ?? [:]).keys)
+        return preferred.filter(all.contains) + all.subtracting(preferred).sorted()
+    }
+
+    static func templateLabel(_ key: String,
+                              definitions: [NotificationTypeDefinition]) -> String {
+        if let definition = definitions.first(where: { $0.id == key }) {
+            return "\(definition.name)模板"
+        }
+        let labels = [
+            "media_added": "入库通知模板",
+            "playback": "播放通知模板",
+            "organize_complete": "整理通知模板",
+            "wash_result": "洗版通知模板",
+            "task_complete": "任务通知模板"
+        ]
+        return labels[key] ?? key
+    }
+
+    private static func unwrap(_ response: JSONValue, keys: [String]) -> JSONValue {
+        var current = response
+        for _ in 0..<4 {
+            guard let object = current.object else { break }
+            if let key = keys.first(where: { object[$0]?.isNull == false }),
+               let nested = object[key] {
+                current = nested
+                continue
+            }
+            if let nested = ["data", "result", "payload"].compactMap({ object[$0] }).first,
+               object.keys.allSatisfy({ metadataKeys.contains($0) }) {
+                current = nested
+                continue
+            }
+            break
+        }
+        return current
+    }
+}
+
+struct NotificationOptionsEditor: View {
+    let definitions: [NotificationTypeDefinition]
+    @Binding var notifyTypes: [String: Bool]
+    @Binding var templates: JSONValue
+    let defaultTemplates: JSONValue
+    @State private var expandedTemplates: Set<String> = []
+
+    var body: some View {
+        Group {
+            Section("通知类型（\(definitions.count)）") {
+                if definitions.isEmpty { EmptyRow("服务端未返回通知类型") }
+                ForEach(definitions) { definition in
+                    Toggle(isOn: typeBinding(definition.id)) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(definition.name)
+                            if let description = definition.description, !description.isEmpty {
+                                Text(description)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                            Text(definition.id)
+                                .font(.caption2)
+                                .foregroundStyle(.tertiary)
+                        }
+                    }
+                }
+            }
+
+            let keys = NotificationSettingsData.templateKeys(templates, defaults: defaultTemplates)
+            if !keys.isEmpty {
+                Section("通知模板（\(keys.count)）") {
+                    ForEach(keys, id: \.self) { key in
+                        DisclosureGroup(isExpanded: expandedBinding(key)) {
+                            TextField("标题模板", text: templateBinding(key, field: "title"), axis: .vertical)
+                                .lineLimit(2...4)
+                            TextField("正文模板", text: templateBinding(key, field: "text"), axis: .vertical)
+                                .lineLimit(4...10)
+                            Button {
+                                resetTemplate(key)
+                            } label: {
+                                Label("恢复默认", systemImage: "arrow.counterclockwise")
+                            }
+                            .disabled(defaultTemplates[key].isNull)
+                        } label: {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(NotificationSettingsData.templateLabel(key, definitions: definitions))
+                                Text(key).font(.caption2).foregroundStyle(.tertiary)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private func typeBinding(_ key: String) -> Binding<Bool> {
+        Binding(get: { notifyTypes[key] ?? true },
+                set: { notifyTypes[key] = $0 })
+    }
+
+    private func templateBinding(_ key: String, field: String) -> Binding<String> {
+        Binding(get: { templates[key][field].string ?? "" }, set: { value in
+            var template = templates[key]
+            template[field] = .string(value)
+            templates[key] = template
+        })
+    }
+
+    private func expandedBinding(_ key: String) -> Binding<Bool> {
+        Binding(get: { expandedTemplates.contains(key) }, set: { expanded in
+            if expanded { expandedTemplates.insert(key) } else { expandedTemplates.remove(key) }
+        })
+    }
+
+    private func resetTemplate(_ key: String) {
+        guard !defaultTemplates[key].isNull else { return }
+        templates[key] = defaultTemplates[key]
+    }
+}
+
 /// 通知渠道总览：Telegram、企业微信、通知类型与模板。
 struct NotifyView: View {
     @EnvironmentObject private var session: AppSession
@@ -38,17 +254,17 @@ struct NotifyView: View {
                 }
             }
 
-            let types = value["types"].list("types", "items", "data")
+            let types = NotificationSettingsData.typeDefinitions(from: value["types"])
             Section("通知类型（\(types.count)）") {
                 if types.isEmpty { EmptyRow("服务端未返回通知类型") }
-                ForEach(Array(types.enumerated()), id: \.offset) { _, item in
+                ForEach(types) { item in
                     VStack(alignment: .leading, spacing: 2) {
-                        Text(item.first(of: "label", "name", "title").displayString
-                             ?? item.string ?? "—")
+                        Text(item.name)
                             .font(.subheadline)
-                        if let key = item.first(of: "key", "id", "type").displayString {
-                            Text(key).font(.caption2).foregroundStyle(.tertiary)
+                        if let description = item.description, !description.isEmpty {
+                            Text(description).font(.caption).foregroundStyle(.secondary)
                         }
+                        Text(item.id).font(.caption2).foregroundStyle(.tertiary)
                     }
                 }
             }
@@ -79,11 +295,28 @@ struct NotifyTemplatesView: View {
     var body: some View {
         RemoteList(title: "默认模板") {
             let api = try session.requireAPI()
-            return try await api.notify.getNotificationDefaultTemplates()
+            let templates = try await api.notify.getNotificationDefaultTemplates()
+            let types = await Probe.json { try await api.notify.getNotificationTypes() }
+            return .object(["templates": templates, "types": types])
         } content: { value, _ in
-            Section("模板") {
-                if value.sortedPairs.isEmpty { EmptyRow("没有默认模板") }
-                JSONFieldList(value: value)
+            let templates = NotificationSettingsData.templateObject(from: value["templates"])
+            let definitions = NotificationSettingsData.typeDefinitions(from: value["types"])
+            let keys = NotificationSettingsData.templateKeys(templates, defaults: .object([:]))
+            Section("模板（\(keys.count)）") {
+                if keys.isEmpty { EmptyRow("没有默认模板") }
+                ForEach(keys, id: \.self) { key in
+                    VStack(alignment: .leading, spacing: 5) {
+                        Text(NotificationSettingsData.templateLabel(key, definitions: definitions))
+                            .font(.subheadline)
+                        if let title = templates[key]["title"].string, !title.isEmpty {
+                            Text(title).font(.caption).foregroundStyle(.secondary)
+                        }
+                        if let text = templates[key]["text"].string, !text.isEmpty {
+                            Text(text).font(.caption2).foregroundStyle(.tertiary).lineLimit(3)
+                        }
+                        Text(key).font(.caption2).foregroundStyle(.tertiary)
+                    }
+                }
             }
             Section { JSONInspector(value: value) }
         }
@@ -106,6 +339,10 @@ struct TelegramNotifyView: View {
     @State private var transferMode = "all"
     @State private var transferDirMode = "system"
     @State private var transferDir = ""
+    @State private var selectedDialogs: [JSONValue] = []
+    @State private var notifyTypes: [String: Bool] = [:]
+    @State private var templates: JSONValue = .object([:])
+    @State private var defaultTemplates: JSONValue = .object([:])
     @State private var testMessage = "CineChill 测试消息"
     @State private var confirmLogout = false
 
@@ -114,7 +351,11 @@ struct TelegramNotifyView: View {
             let api = try session.requireAPI()
             let config = await Probe.json { try await api.notify.getTelegramNotifyConfig() }
             let status = await Probe.json { try await api.notify.getTelegramStatus() }
-            return JSONValue.object(["config": config, "status": status])
+            let types = await Probe.json { try await api.notify.getNotificationTypes() }
+            let defaults = await Probe.json { try await api.notify.getNotificationDefaultTemplates() }
+            return JSONValue.object([
+                "config": config, "status": status, "types": types, "defaults": defaults
+            ])
         } content: { value, reload in
             Section("Bot 推送") {
                 Toggle("启用", isOn: $enabled)
@@ -185,6 +426,12 @@ struct TelegramNotifyView: View {
                 .foregroundStyle(.red)
             }
 
+            NotificationOptionsEditor(
+                definitions: NotificationSettingsData.typeDefinitions(from: value["types"]),
+                notifyTypes: $notifyTypes,
+                templates: $templates,
+                defaultTemplates: defaultTemplates)
+
             Section {
                 Button {
                     save(reload: reload)
@@ -204,12 +451,15 @@ struct TelegramNotifyView: View {
                 }
                 Button("取消", role: .cancel) {}
             }
-            .task { apply(value["config"]) }
+            .task(id: value) { apply(value) }
         }
         .actionFeedback(runner)
     }
 
-    private func apply(_ config: JSONValue) {
+    private func apply(_ value: JSONValue) {
+        let config = value["config"]
+        let definitions = NotificationSettingsData.typeDefinitions(from: value["types"])
+        let defaults = NotificationSettingsData.templateObject(from: value["defaults"])
         enabled = config.deepFirst(of: "enabled").bool ?? enabled
         name = config.deepFirst(of: "name").string ?? name
         chatID = config.deepFirst(of: "chat_id").displayString ?? chatID
@@ -220,6 +470,13 @@ struct TelegramNotifyView: View {
         transferMode = config.deepFirst(of: "monitor_transfer_mode").string ?? transferMode
         transferDirMode = config.deepFirst(of: "transfer_dir_mode").string ?? transferDirMode
         transferDir = config.deepFirst(of: "transfer_dir").string ?? transferDir
+        selectedDialogs = config.deepFirst(of: "selected_dialogs").array ?? selectedDialogs
+        notifyTypes = NotificationSettingsData.notifyTypeValues(
+            config: config, definitions: definitions)
+        defaultTemplates = defaults
+        templates = NotificationSettingsData.mergedTemplates(
+            defaults: defaults,
+            custom: NotificationSettingsData.configTemplates(from: config))
     }
 
     private func save(reload: Reload) {
@@ -230,10 +487,13 @@ struct TelegramNotifyView: View {
                                           chatId: chatID,
                                           accountMonitorEnabled: monitorEnabled,
                                           apiId: apiID, apiHash: apiHash, phone: phone,
+                                          selectedDialogs: selectedDialogs,
                                           monitorReplyEnabled: monitorReply,
                                           monitorTransferMode: transferMode,
                                           transferDirMode: transferDirMode,
-                                          transferDir: transferDir))
+                                          transferDir: transferDir,
+                                          notifyTypes: NotificationSettingsData.notifyTypeJSON(notifyTypes),
+                                          templates: templates))
         }, onSuccess: {
             botToken = ""
             apiHash = ""

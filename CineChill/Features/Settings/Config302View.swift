@@ -66,7 +66,7 @@ struct Config302View: View {
                 }
             }
 
-            Section("登录与校验") {
+            Section {
                 NavigationLink {
                     Qrcode115LoginView(config: config, reload: reload)
                 } label: {
@@ -77,6 +77,10 @@ struct Config302View: View {
                 } label: {
                     Label("测试 115 Cookie", systemImage: "checkmark.shield")
                 }
+            } header: {
+                Text("登录与校验")
+            } footer: {
+                Text("115 Cookie 属于敏感凭据，仅在本机与你的 CineChill 服务器之间传输。表单中默认不回显完整内容。")
             }
 
             Section("维护操作") {
@@ -101,17 +105,11 @@ struct Config302View: View {
                 } label: {
                     Label("创建标准目录结构", systemImage: "folder.badge.gearshape")
                 }
-            }
-
-            Section {
                 NavigationLink {
-                    Config302RawView()
+                    Config302AdvancedConfigView()
                 } label: {
-                    Label("原始配置编辑", systemImage: "curlybraces")
+                    Label("高级配置", systemImage: "slider.horizontal.3")
                 }
-                JSONInspector(value: value)
-            } footer: {
-                Text("115 Cookie 属于敏感凭据，仅在本机与你的 CineChill 服务器之间传输。表单中默认不回显完整内容。")
             }
         }
         .actionFeedback(runner)

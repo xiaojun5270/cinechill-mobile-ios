@@ -4,53 +4,53 @@ import SwiftUI
 struct AutomationView: View {
     var body: some View {
         List {
-            Section("订阅与 RSS") {
-                ModuleRow(title: "RSS 订阅",
-                          subtitle: "任务、链接生成器、预览与立即运行",
-                          systemImage: "dot.radiowaves.up.forward",
-                          tint: .orange) { RSSView() }
-                ModuleRow(title: "订阅中心",
-                          subtitle: "订阅源、同步、事件与动态",
-                          systemImage: "bell.badge",
-                          tint: .pink) { SubscriptionsView() }
-                ModuleRow(title: "MoviePilot",
-                          subtitle: "连接、站点监控与订阅管理",
-                          systemImage: "arrow.triangle.branch",
-                          tint: .indigo) { MoviePilotView() }
+            Section("媒体整理") {
+                ModuleRow(title: "一条龙菜单",
+                          subtitle: "整理策略、监听、洗版与手动任务",
+                          systemImage: "folder.badge.gearshape",
+                          tint: .blue) { MediaOrganizeView() }
+                ModuleRow(title: "整理记录",
+                          subtitle: "历史记录、重做与 AI 重做",
+                          systemImage: "clock.arrow.circlepath",
+                          tint: .brown) { OrganizeHistoryView() }
+                ModuleRow(title: "重命名模板",
+                          subtitle: "电影、剧集目录与文件名模板",
+                          systemImage: "textformat",
+                          tint: .teal) { RenameTemplateView() }
+                ModuleRow(title: "二级分类",
+                          subtitle: "电影、剧集分类规则与 Emby 同步",
+                          systemImage: "square.grid.3x3",
+                          tint: .purple) { CategoryRulesView() }
             }
 
-            Section("115 网盘") {
-                ModuleRow(title: "网盘清理",
-                          subtitle: "清理任务、目录浏览、立即执行",
-                          systemImage: "trash.circle",
-                          tint: .teal) { Cleanup115View() }
-                ModuleRow(title: "网盘上传",
-                          subtitle: "上传任务、秒传、线程设置",
-                          systemImage: "arrow.up.circle",
-                          tint: .cyan) { Upload115View() }
-                ModuleRow(title: "STRM 同步",
-                          subtitle: "配置、同步进度、元数据回填",
-                          systemImage: "link.circle",
-                          tint: .mint) { StrmView() }
-            }
-
-            Section("资源与集成") {
-                ModuleRow(title: "资源搜索转发",
-                          subtitle: "搜索源、预览、转存与播放",
-                          systemImage: "magnifyingglass.circle",
-                          tint: .purple) { ForwardView() }
-                ModuleRow(title: "Webhook",
-                          subtitle: "Emby Webhook 配置与队列",
-                          systemImage: "arrow.left.arrow.right",
-                          tint: .brown) { WebhookView() }
+            Section("任务与运维") {
+                ModuleRow(title: "Emby 任务中心",
+                          subtitle: "计划任务运行与触发器",
+                          systemImage: "clock.badge.checkmark",
+                          tint: .teal) { EmbyTasksView() }
                 ModuleRow(title: "Docker 管理",
                           subtitle: "容器、镜像、更新与仓库认证",
                           systemImage: "shippingbox",
                           tint: .blue) { DockerView() }
-                ModuleRow(title: "飞牛签到",
-                          subtitle: "Cookie 测试、立即签到、历史",
-                          systemImage: "checkmark.seal",
-                          tint: .green) { FnosSignView() }
+                ModuleRow(title: "115秒传",
+                          subtitle: "上传任务、云端秒传与并发设置",
+                          systemImage: "icloud.and.arrow.up",
+                          tint: .cyan) { Upload115View() }
+                ModuleRow(title: "真实库",
+                          subtitle: "RSS 任务、榜单链接与硬链接入库",
+                          systemImage: "dot.radiowaves.up.forward",
+                          tint: .orange) { RSSView() }
+                ModuleRow(title: "工具箱",
+                          subtitle: "115、转存、通知与集成工具",
+                          systemImage: "wrench.and.screwdriver",
+                          tint: .indigo) { ToolboxView() }
+            }
+
+            Section("同步服务") {
+                ModuleRow(title: "STRM 同步",
+                          subtitle: "配置、同步进度、元数据回填",
+                          systemImage: "link.circle",
+                          tint: .mint) { StrmView() }
             }
         }
         .navigationTitle("自动化")

@@ -268,16 +268,52 @@ public enum JSONValue: Codable, Hashable, Sendable {
         return true
     }
 
-    /// 服务端错误文案，兼容 detail / message / error / msg。
+    /// 服务端错误文案，兼容顶层或 data/result 等对象内嵌套的常见错误结构。
     public var errorMessage: String? {
-        for key in ["detail", "message", "error", "msg", "reason"] {
-            let v = self[key]
-            if let s = v.string, !s.isEmpty { return s }
-            if let arr = v.array {
-                let joined = arr.compactMap { $0["msg"].string ?? $0.displayString }.joined(separator: "; ")
-                if !joined.isEmpty { return joined }
+        let keys = ["detail", "message", "error", "msg", "reason", "errors"]
+        var frontier = [self]
+        var depth = 0
+
+        while !frontier.isEmpty, depth <= 4 {
+            for node in frontier {
+                guard let object = node.object else { continue }
+                for key in keys {
+                    guard let value = object[key],
+                          let message = Self.errorText(from: value),
+                          !message.isEmpty else { continue }
+                    return message
+                }
             }
-            if let obj = v.object, let s = obj["msg"]?.string { return s }
+
+            frontier = frontier.flatMap { node -> [JSONValue] in
+                if let object = node.object { return Array(object.values) }
+                if let array = node.array { return array }
+                return []
+            }
+            depth += 1
+        }
+        return nil
+    }
+
+    private static func errorText(from value: JSONValue) -> String? {
+        if let string = value.string {
+            return string.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        if let array = value.array {
+            let messages = array.compactMap { item -> String? in
+                for key in ["msg", "message", "detail", "error", "reason"] {
+                    if let text = errorText(from: item[key]), !text.isEmpty { return text }
+                }
+                return item.displayString
+            }
+            return messages.isEmpty ? nil : messages.joined(separator: "; ")
+        }
+        if let object = value.object {
+            for key in ["msg", "message", "detail", "error", "reason"] {
+                if let nested = object[key],
+                   let text = errorText(from: nested),
+                   !text.isEmpty { return text }
+            }
         }
         return nil
     }

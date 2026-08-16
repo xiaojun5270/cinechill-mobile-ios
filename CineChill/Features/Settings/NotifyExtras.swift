@@ -66,14 +66,17 @@ struct TelegramDialogsView: View {
     @EnvironmentObject private var session: AppSession
     @StateObject private var runner = ActionRunner()
     @State private var selected: Set<String> = []
-    @State private var prepared = false
 
     var body: some View {
         RemoteList(title: "监听会话") {
             let api = try session.requireAPI()
-            return try await api.notify.listTelegramDialogs()
+            let dialogs = try await api.notify.listTelegramDialogs()
+            let config = await Probe.json { try await api.notify.getTelegramNotifyConfig() }
+            return .object(["dialogs": dialogs, "config": config])
         } content: { value, reload in
-            let dialogs = value.list("dialogs", "items", "data", "chats")
+            let loadedDialogs = value["dialogs"].list("dialogs", "items", "data", "chats")
+            let savedDialogs = value["config"].deepFirst(of: "selected_dialogs").array ?? []
+            let dialogs = Self.mergedDialogs(loaded: loadedDialogs, saved: savedDialogs)
             Section("会话（\(dialogs.count)）") {
                 if dialogs.isEmpty { EmptyRow("没有可选会话，请先完成 Telegram 登录") }
                 ForEach(Array(dialogs.enumerated()), id: \.offset) { _, dialog in
@@ -113,14 +116,17 @@ struct TelegramDialogsView: View {
             } footer: {
                 Text("只有被选中的会话会被监听并触发自动转存。")
             }
-            .task {
-                guard !prepared else { return }
-                prepared = true
-                let preset = value.list("selected_dialogs", "selected", "monitored")
-                for item in preset { selected.insert(Self.identifier(item)) }
-                for dialog in dialogs where dialog.first(of: "selected", "monitored").bool == true {
-                    selected.insert(Self.identifier(dialog))
+            .task(id: value) {
+                var initial: Set<String> = []
+                let responseSelected = value["dialogs"].deepFirst(
+                    of: "selected_dialogs", "selected", "monitored").array ?? []
+                for item in savedDialogs + responseSelected {
+                    initial.insert(Self.identifier(item))
                 }
+                for dialog in dialogs where dialog.first(of: "selected", "monitored").bool == true {
+                    initial.insert(Self.identifier(dialog))
+                }
+                selected = initial
             }
         }
         .actionFeedback(runner)
@@ -136,7 +142,8 @@ struct TelegramDialogsView: View {
     }
 
     static func avatarURL(_ dialog: JSONValue, session: AppSession) -> URL? {
-        guard let raw = dialog.first(of: "avatar", "avatar_file", "avatar_filename", "photo").displayString,
+        guard let raw = dialog.first(
+            of: "avatar_url", "avatar", "avatar_file", "avatar_filename", "photo").displayString,
               !raw.isEmpty else { return nil }
         if raw.hasPrefix("http") { return URL(string: raw) }
         if raw.hasPrefix("/") { return session.absoluteURL(raw) }
@@ -147,6 +154,24 @@ struct TelegramDialogsView: View {
     static func identifier(_ dialog: JSONValue) -> String {
         dialog.first(of: "id", "chat_id", "peer_id", "dialog_id").displayString
             ?? dialog.displayString ?? ""
+    }
+
+    static func mergedDialogs(loaded: [JSONValue], saved: [JSONValue]) -> [JSONValue] {
+        var orderedIDs: [String] = []
+        var dialogsByID: [String: JSONValue] = [:]
+
+        for dialog in saved + loaded {
+            let id = identifier(dialog)
+            guard !id.isEmpty else { continue }
+            if dialogsByID[id] == nil { orderedIDs.append(id) }
+            if var fields = dialogsByID[id]?.object, let newFields = dialog.object {
+                fields.merge(newFields) { _, new in new }
+                dialogsByID[id] = .object(fields)
+            } else {
+                dialogsByID[id] = dialog
+            }
+        }
+        return orderedIDs.compactMap { dialogsByID[$0] }
     }
 }
 
@@ -164,14 +189,24 @@ struct WechatNotifyView: View {
     @State private var proxyURL = ""
     @State private var aesKey = ""
     @State private var whitelist = ""
+    @State private var notifyTypes: [String: Bool] = [:]
+    @State private var templates: JSONValue = .object([:])
+    @State private var defaultTemplates: JSONValue = .object([:])
     @State private var testMessage = "CineChill 测试消息"
 
     var body: some View {
         RemoteList(title: "企业微信") {
             let api = try session.requireAPI()
             let config = await Probe.json { try await api.notify.getWechatNotifyConfig() }
-            let types = await Probe.json { try await api.notify.getWechatNotificationTypes() }
-            return JSONValue.object(["config": config, "types": types])
+            let unifiedTypes = await Probe.json { try await api.notify.getNotificationTypes() }
+            let types: JSONValue
+            if NotificationSettingsData.typeDefinitions(from: unifiedTypes).isEmpty {
+                types = await Probe.json { try await api.notify.getWechatNotificationTypes() }
+            } else {
+                types = unifiedTypes
+            }
+            let defaults = await Probe.json { try await api.notify.getNotificationDefaultTemplates() }
+            return JSONValue.object(["config": config, "types": types, "defaults": defaults])
         } content: { value, reload in
             Section("基础") {
                 Toggle("启用", isOn: $enabled)
@@ -218,16 +253,11 @@ struct WechatNotifyView: View {
                 }
             }
 
-            let types = value["types"].list("types", "items", "data")
-            if !types.isEmpty {
-                Section("支持的通知类型（\(types.count)）") {
-                    ForEach(Array(types.enumerated()), id: \.offset) { _, item in
-                        Text(item.first(of: "label", "name", "key").displayString
-                             ?? item.string ?? "—")
-                            .font(.subheadline)
-                    }
-                }
-            }
+            NotificationOptionsEditor(
+                definitions: NotificationSettingsData.typeDefinitions(from: value["types"]),
+                notifyTypes: $notifyTypes,
+                templates: $templates,
+                defaultTemplates: defaultTemplates)
 
             Section {
                 Button {
@@ -237,14 +267,17 @@ struct WechatNotifyView: View {
                 }
                 JSONInspector(value: value)
             } footer: {
-                Text("Secret、Token、AESKey 留空表示保留服务器上已有的值。回调地址需要在企业微信后台填写为 CineChill 的 /api/notify/wechat/callback。")
+                Text("Secret、Token、AESKey 留空表示保留服务器上已有的值。回调地址需要在企业微信后台填写为 CineChill 的 /api/wechat-notify/callback。")
             }
-            .task { apply(value["config"]) }
+            .task(id: value) { apply(value) }
         }
         .actionFeedback(runner)
     }
 
-    private func apply(_ config: JSONValue) {
+    private func apply(_ value: JSONValue) {
+        let config = value["config"]
+        let definitions = NotificationSettingsData.typeDefinitions(from: value["types"])
+        let defaults = NotificationSettingsData.templateObject(from: value["defaults"])
         enabled = config.deepFirst(of: "enabled").bool ?? enabled
         name = config.deepFirst(of: "name").string ?? name
         channelName = config.deepFirst(of: "channel_name").string ?? channelName
@@ -252,6 +285,12 @@ struct WechatNotifyView: View {
         agentID = config.deepFirst(of: "agent_id").displayString ?? agentID
         proxyURL = config.deepFirst(of: "proxy_url").string ?? proxyURL
         whitelist = config.deepFirst(of: "admin_whitelist").string ?? whitelist
+        notifyTypes = NotificationSettingsData.notifyTypeValues(
+            config: config, definitions: definitions)
+        defaultTemplates = defaults
+        templates = NotificationSettingsData.mergedTemplates(
+            defaults: defaults,
+            custom: NotificationSettingsData.configTemplates(from: config))
     }
 
     private func save(reload: Reload) {
@@ -261,7 +300,9 @@ struct WechatNotifyView: View {
                 WechatNotifyConfigModel(enabled: enabled, name: name, channelName: channelName,
                                         corpId: corpID, appSecret: appSecret, token: token,
                                         agentId: agentID, proxyUrl: proxyURL,
-                                        encodingAesKey: aesKey, adminWhitelist: whitelist))
+                                        encodingAesKey: aesKey, adminWhitelist: whitelist,
+                                        notifyTypes: NotificationSettingsData.notifyTypeJSON(notifyTypes),
+                                        templates: templates))
         }, onSuccess: {
             appSecret = ""
             token = ""

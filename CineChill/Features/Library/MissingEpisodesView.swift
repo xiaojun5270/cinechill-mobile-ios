@@ -123,9 +123,6 @@ struct MissingSeriesDetailView: View {
                 Text("标记后该剧（或该季）不再计入缺集统计，适用于官方已完结但集数信息不准确的情况。")
             }
 
-            Section("原始数据") {
-                JSONFieldList(value: show)
-            }
         }
         .navigationTitle(show.first(of: "title", "name").displayString ?? "缺集详情")
         .actionFeedback(runner)
