@@ -51,7 +51,7 @@ struct MoviePilotSitesView: View {
     private func monitorSection(config: MoviePilotMonitorDraft,
                                 status: MoviePilotMonitorData,
                                 reload: Reload) -> some View {
-        Section("新种监控") {
+        Section {
             HStack {
                 Text("状态")
                 Spacer()
@@ -87,6 +87,8 @@ struct MoviePilotSitesView: View {
                 Label("全部健康检查", systemImage: "heart.text.square")
             }
             .disabled(status.running || status.healthCheckRunning)
+        } header: {
+            Text("新种监控")
         } footer: {
             Text("修改监控设置后需先保存；立即执行只处理已经启用监控的站点。")
         }
