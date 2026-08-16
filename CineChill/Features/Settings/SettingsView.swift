@@ -34,10 +34,6 @@ struct SettingsView: View {
             }
 
             Section("这台设备") {
-                ModuleRow(title: "全部功能",
-                          subtitle: "\(ModuleIndex.all.count) 个页面，可搜索与收藏",
-                          systemImage: "square.grid.3x3.square",
-                          tint: .blue) { ModuleSearchView() }
                 ModuleRow(title: "外观",
                           subtitle: "导航栏：\(chromeTitle)",
                           systemImage: "paintbrush.pointed",

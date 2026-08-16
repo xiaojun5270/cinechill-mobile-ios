@@ -4,21 +4,6 @@ import SwiftUI
 struct AutomationView: View {
     var body: some View {
         List {
-            Section("任务与日志") {
-                ModuleRow(title: "任务中心",
-                          subtitle: "运行进度、计划任务、停止与清理",
-                          systemImage: "list.bullet.rectangle.portrait",
-                          tint: .blue) { TaskCenterView() }
-                ModuleRow(title: "系统日志",
-                          subtitle: "按级别与关键词筛选",
-                          systemImage: "doc.plaintext",
-                          tint: .gray) { SystemLogsView() }
-                ModuleRow(title: "系统健康",
-                          subtitle: "CPU / 内存 / 磁盘、网络连通性",
-                          systemImage: "heart.text.square",
-                          tint: .red) { SystemHealthView() }
-            }
-
             Section("订阅与 RSS") {
                 ModuleRow(title: "RSS 订阅",
                           subtitle: "任务、链接生成器、预览与立即运行",

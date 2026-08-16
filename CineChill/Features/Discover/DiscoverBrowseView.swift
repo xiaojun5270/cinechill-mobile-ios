@@ -300,12 +300,6 @@ struct DiscoverBrowseView: View {
                     Label("批量获取 TMDb 海报", systemImage: "photo.on.rectangle.angled")
                 }
                 NavigationLink {
-                    EmbyItemsDeleteView()
-                } label: {
-                    Label("删除 Emby 剧集条目", systemImage: "trash")
-                        .foregroundStyle(.red)
-                }
-                NavigationLink {
                     SSEStreamView(title: "发现实时事件",
                                   note: "服务端在刷新缓存、抓取数据源时会推送事件，页面停留期间保持长连接。") {
                         try $0.discover.discoverRealtimeEventsRequest()

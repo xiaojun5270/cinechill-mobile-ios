@@ -120,6 +120,14 @@ struct EmbyOverviewView: View {
                 Label("搜索媒体库条目", systemImage: "text.magnifyingglass").font(.subheadline)
             }
 
+            NavigationLink {
+                EmbyItemsDeleteView()
+            } label: {
+                Label("删除 Emby 剧集条目", systemImage: "trash")
+                    .font(.subheadline)
+                    .foregroundStyle(.red)
+            }
+
             if let text = runner.lastResult.displayString, !text.isEmpty {
                 Text(text).font(.caption).foregroundStyle(.secondary).lineLimit(3)
             }

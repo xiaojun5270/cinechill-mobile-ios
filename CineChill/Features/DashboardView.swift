@@ -569,40 +569,77 @@ struct DashboardView: View {
     // MARK: - 原始数据
 
     private func rawCard(_ value: JSONValue, reload: Reload) -> some View {
-        CardSection(title: "诊断", systemImage: "stethoscope") {
+        let snapshots = [value["stats"], value["metrics"], value["drive115"],
+                         value["overview"], value["progress"], value["health"]]
+        let available = snapshots.filter { !$0.isNull && !$0.isEmptyContainer }.count
+        return CardSection(title: "诊断", systemImage: "stethoscope",
+                           trailing: AnyView(
+                            StatusBadge("\(available)/\(snapshots.count) 可用",
+                                        tone: available == snapshots.count ? .good : .warning)
+                           )) {
             VStack(alignment: .leading, spacing: 10) {
+                diagnosticRawLink("dashboard_stats", value: value["stats"])
+                diagnosticRawLink("device_metrics", value: value["metrics"])
+                diagnosticRawLink("dashboard_115_account", value: value["drive115"])
+                diagnosticRawLink("emby_overview", value: value["overview"])
+                diagnosticRawLink("progress", value: value["progress"])
+                diagnosticRawLink("system_health", value: value["health"])
+
+                Divider()
+
                 NavigationLink {
-                    JSONRawScreen(value: value["stats"], title: "dashboard_stats")
+                    DashboardEndpointDiagnosticsView()
                 } label: {
-                    Label("dashboard_stats 原始数据", systemImage: "curlybraces")
-                }
-                NavigationLink {
-                    JSONRawScreen(value: value["metrics"], title: "device_metrics")
-                } label: {
-                    Label("device_metrics 原始数据", systemImage: "curlybraces")
-                }
-                NavigationLink {
-                    JSONRawScreen(value: value["overview"], title: "dashboard_emby_overview")
-                } label: {
-                    Label("emby_overview 原始数据", systemImage: "curlybraces")
-                }
-                NavigationLink {
-                    JSONRawScreen(value: value["progress"], title: "progress")
-                } label: {
-                    Label("progress 原始数据", systemImage: "curlybraces")
+                    Label("运行完整接口诊断", systemImage: "waveform.path.ecg")
                 }
                 NavigationLink {
                     SystemHealthView()
                 } label: {
                     Label("系统健康检查", systemImage: "heart.text.square")
                 }
+                NavigationLink {
+                    SystemLogsView()
+                } label: {
+                    Label("系统日志", systemImage: "doc.plaintext")
+                }
+                NavigationLink {
+                    JSONRawScreen(value: value, title: "仪表盘完整快照")
+                } label: {
+                    Label("查看完整快照", systemImage: "doc.text.magnifyingglass")
+                }
                 Button {
                     reload.fire()
                 } label: {
-                    Label("刷新", systemImage: "arrow.clockwise")
+                    Label("刷新仪表盘数据", systemImage: "arrow.clockwise")
                 }
             }
             .font(.subheadline)
         }
+    }
+
+    private func diagnosticRawLink(_ title: String, value: JSONValue) -> some View {
+        NavigationLink {
+            JSONRawScreen(value: value, title: title)
+        } label: {
+            HStack(spacing: 8) {
+                Label(title + " 原始数据", systemImage: "curlybraces")
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
+                Spacer(minLength: 8)
+                StatusBadge(diagnosticStatusText(value), tone: diagnosticStatusTone(value))
+            }
+        }
+    }
+
+    private func diagnosticStatusText(_ value: JSONValue) -> String {
+        if value.isNull { return "不可用" }
+        if value.isEmptyContainer { return "空响应" }
+        return "正常"
+    }
+
+    private func diagnosticStatusTone(_ value: JSONValue) -> BadgeTone {
+        if value.isNull { return .bad }
+        if value.isEmptyContainer { return .warning }
+        return .good
     }
 }

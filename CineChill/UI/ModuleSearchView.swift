@@ -1,7 +1,7 @@
 import SwiftUI
 import UIKit
 
-/// 全局功能搜索：129 个页面原本要在五个标签页里逐层点开，这里一次搜到底。
+/// 全局功能搜索：索引各标签页及其子页面，可按名称、接口路径或关键词直达。
 struct ModuleSearchView: View {
     @EnvironmentObject private var favorites: ModuleFavorites
     @State private var query = ""

@@ -165,9 +165,6 @@ public enum ModuleIndex {
         ModuleEntry(id: "TmdbArtworkBatchView", title: "批量海报", group: "发现", tab: .discover,
                     systemImage: "photo.stack", tint: .orange,
                     keywords: "artwork 海报 批量 poster /api/discover/tmdb_artwork") { AnyView(TmdbArtworkBatchView()) },
-        ModuleEntry(id: "EmbyItemsDeleteView", title: "删除 Emby 条目", group: "发现", tab: .discover,
-                    systemImage: "trash", tint: .red,
-                    keywords: "delete 删除 emby 条目 清理") { AnyView(EmbyItemsDeleteView()) },
     ]
 
     // MARK: - 媒体库
@@ -185,6 +182,9 @@ public enum ModuleIndex {
         ModuleEntry(id: "EmbySearchView", title: "Emby 搜索", group: "Emby", tab: .library,
                     systemImage: "text.magnifyingglass", tint: .cyan,
                     keywords: "emby search 检索 条目") { AnyView(EmbySearchView()) },
+        ModuleEntry(id: "EmbyItemsDeleteView", title: "删除 Emby 条目", group: "Emby", tab: .library,
+                    systemImage: "trash", tint: .red,
+                    keywords: "delete 删除 emby 条目 清理") { AnyView(EmbyItemsDeleteView()) },
         ModuleEntry(id: "MediaOrganizeView", title: "媒体整理", group: "整理与入库", tab: .library,
                     systemImage: "folder.badge.gearshape", tint: .orange,
                     keywords: "organize 整理 入库 硬链 命名 /api/media_organize") { AnyView(MediaOrganizeView()) },

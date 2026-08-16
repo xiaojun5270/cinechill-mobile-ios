@@ -31,17 +31,112 @@ struct TabRootView: View {
 // MARK: - iPhone
 
 private struct TabLayout: View {
+    @State private var selection: AppTab = .dashboard
+
+    @ViewBuilder
     var body: some View {
-        TabView {
+        if GlassChrome.systemDrawsGlass {
+            tabs
+                .glassTabBar()
+        } else {
+            tabs
+                .toolbar(.hidden, for: .tabBar)
+                .safeAreaInset(edge: .bottom, spacing: 0) {
+                    LiquidGlassTabBar(selection: $selection)
+                        .padding(.horizontal, 12)
+                        .padding(.top, 6)
+                        .padding(.bottom, 4)
+                }
+        }
+    }
+
+    private var tabs: some View {
+        TabView(selection: $selection) {
             ForEach(AppTab.allCases) { tab in
                 NavigationStack {
                     TabRootView(tab: tab)
                         .glassNavigationBar()
                 }
                 .tabItem { Label(tab.title, systemImage: tab.systemImage) }
+                .tag(tab)
             }
         }
-        .glassTabBar()
+    }
+}
+
+/// iOS 17/18 上的 Liquid Glass 兼容标签栏。iOS 26 + 新 SDK 会直接使用系统标签栏。
+private struct LiquidGlassTabBar: View {
+    @Binding var selection: AppTab
+    @AppStorage(chromeStyleKey) private var rawStyle = ChromeStyle.liquidGlass.rawValue
+    @Environment(\.colorScheme) private var colorScheme
+    @Namespace private var selectionAnimation
+
+    private var style: ChromeStyle {
+        ChromeStyle(rawValue: rawStyle) ?? .liquidGlass
+    }
+
+    var body: some View {
+        HStack(spacing: 2) {
+            ForEach(AppTab.allCases) { tab in
+                Button {
+                    withAnimation(.snappy(duration: 0.28, extraBounce: 0.06)) {
+                        selection = tab
+                    }
+                } label: {
+                    ZStack {
+                        if selection == tab {
+                            Capsule()
+                                .fill(Color.accentColor.opacity(colorScheme == .dark ? 0.24 : 0.14))
+                                .overlay {
+                                    Capsule()
+                                        .strokeBorder(Color.accentColor.opacity(0.2), lineWidth: 0.6)
+                                }
+                                .matchedGeometryEffect(id: "selected-tab", in: selectionAnimation)
+                        }
+                        VStack(spacing: 3) {
+                            Image(systemName: tab.systemImage)
+                                .font(.system(size: 19, weight: .medium))
+                                .symbolVariant(selection == tab ? .fill : .none)
+                            Text(tab.title)
+                                .font(.caption2.weight(selection == tab ? .semibold : .regular))
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.75)
+                        }
+                        .foregroundStyle(selection == tab ? Color.accentColor : Color.secondary)
+                    }
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 52)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(tab.title)
+                .accessibilityAddTraits(selection == tab ? .isSelected : [])
+            }
+        }
+        .padding(5)
+        .frame(maxWidth: 560)
+        .background { glassBackground }
+    }
+
+    @ViewBuilder
+    private var glassBackground: some View {
+        let shape = Capsule()
+        switch style {
+        case .liquidGlass:
+            shape.fill(.ultraThinMaterial)
+        case .frosted:
+            shape.fill(.thinMaterial)
+        case .system:
+            shape.fill(.bar)
+        }
+        shape
+            .strokeBorder(Color.white.opacity(colorScheme == .dark ? 0.14 : 0.58), lineWidth: 0.7)
+        shape
+            .strokeBorder(Color.black.opacity(colorScheme == .dark ? 0.28 : 0.08), lineWidth: 0.35)
+        shape
+            .fill(Color.clear)
+            .shadow(color: Color.black.opacity(colorScheme == .dark ? 0.28 : 0.14),
+                    radius: 14, y: 6)
     }
 }
 
