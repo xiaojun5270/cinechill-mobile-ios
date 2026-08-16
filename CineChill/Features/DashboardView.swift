@@ -9,6 +9,157 @@ private struct DashboardTrendPoint: Identifiable {
     let series: Int
 }
 
+private struct DashboardPanel<Content: View>: View {
+    let title: String
+    let systemImage: String
+    let tint: Color
+    var trailing: AnyView?
+    @ViewBuilder var content: () -> Content
+
+    init(title: String, systemImage: String, tint: Color, trailing: AnyView? = nil,
+         @ViewBuilder content: @escaping () -> Content) {
+        self.title = title
+        self.systemImage = systemImage
+        self.tint = tint
+        self.trailing = trailing
+        self.content = content
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(spacing: 10) {
+                Image(systemName: systemImage)
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(tint)
+                    .frame(width: 32, height: 32)
+                    .background(tint.opacity(0.12), in: RoundedRectangle(cornerRadius: 8))
+                Text(title)
+                    .font(.headline)
+                    .lineLimit(1)
+                Spacer(minLength: 8)
+                if let trailing { trailing }
+            }
+            content()
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color(uiColor: .secondarySystemGroupedBackground),
+                    in: RoundedRectangle(cornerRadius: 14))
+        .overlay {
+            RoundedRectangle(cornerRadius: 14)
+                .strokeBorder(Color(uiColor: .separator).opacity(0.16), lineWidth: 0.5)
+        }
+    }
+}
+
+private struct DashboardMetric: View {
+    let title: String
+    let value: String
+    let systemImage: String
+    let tint: Color
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Image(systemName: systemImage)
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(tint)
+                .frame(width: 32, height: 32)
+                .background(tint.opacity(0.12), in: RoundedRectangle(cornerRadius: 8))
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Text(value)
+                    .font(.title3.weight(.bold))
+                    .monospacedDigit()
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.65)
+            }
+        }
+        .frame(maxWidth: .infinity, minHeight: 46, alignment: .leading)
+    }
+}
+
+private struct DashboardGauge: View {
+    let title: String
+    let caption: String
+    let systemImage: String
+    let tint: Color
+    private let ratio: Double
+
+    init(title: String, caption: String, systemImage: String, tint: Color, ratio: Double) {
+        self.title = title
+        self.caption = caption
+        self.systemImage = systemImage
+        self.tint = tint
+        self.ratio = min(max(ratio.isFinite ? ratio : 0, 0), 1)
+    }
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 11) {
+            Image(systemName: systemImage)
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundStyle(tint)
+                .frame(width: 30, height: 30)
+                .background(tint.opacity(0.11), in: RoundedRectangle(cornerRadius: 8))
+            VStack(alignment: .leading, spacing: 7) {
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Text(title).font(.subheadline.weight(.medium))
+                    Spacer(minLength: 8)
+                    Text(caption)
+                        .font(.caption.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.7)
+                }
+                ProgressView(value: ratio)
+                    .tint(ratio > 0.9 ? .red : ratio > 0.75 ? .orange : tint)
+            }
+        }
+    }
+}
+
+private struct DashboardMetaItem: View {
+    let text: String
+    let systemImage: String
+    let tint: Color
+
+    var body: some View {
+        Label {
+            Text(text).lineLimit(1).minimumScaleFactor(0.75)
+        } icon: {
+            Image(systemName: systemImage).foregroundStyle(tint)
+        }
+        .font(.caption)
+        .foregroundStyle(.secondary)
+    }
+}
+
+private struct DashboardActionLabel: View {
+    let title: String
+    let systemImage: String
+    let tint: Color
+    var showsChevron = true
+
+    var body: some View {
+        HStack(spacing: 11) {
+            Image(systemName: systemImage)
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundStyle(tint)
+                .frame(width: 30, height: 30)
+                .background(tint.opacity(0.11), in: RoundedRectangle(cornerRadius: 8))
+            Text(title).foregroundStyle(.primary)
+            Spacer()
+            if showsChevron {
+                Image(systemName: "chevron.right")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.tertiary)
+            }
+        }
+        .contentShape(Rectangle())
+    }
+}
+
 /// 仪表盘：媒体库总览、设备状态、115 账号、任务动态。
 /// 服务端未声明响应结构，因此所有取值都用候选键名兜底。
 struct DashboardView: View {
@@ -40,13 +191,12 @@ struct DashboardView: View {
                 "overview": overview,
             ])
         } content: { value, reload in
-            greeting
             let overview = value["overview"]
             let mediaStats = overview["media_stats"].isNull ? value["stats"] : overview["media_stats"]
+            greeting
             libraryOverview(mediaStats, overview: overview)
-            deviceCard(value["metrics"])
-            drive115Card(value["drive115"])
-            taskCard(value["progress"])
+            operationalGrid(metrics: value["metrics"], drive: value["drive115"],
+                            progress: value["progress"])
             trendCard(overview)
             continueWatchingCard(overview)
             librariesCard(mediaStats)
@@ -67,17 +217,40 @@ struct DashboardView: View {
     // MARK: - 顶部问候
 
     private var greeting: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text("\(salutation)，\(session.displayUsername)")
-                .font(.title3.weight(.semibold))
-            Text("好内容不怕晚一点抵达，稳定才是长久的浪漫。")
-                .font(.footnote)
-                .foregroundStyle(.secondary)
+        HStack(spacing: 14) {
+            Image(systemName: salutationIcon)
+                .font(.system(size: 20, weight: .semibold))
+                .foregroundStyle(salutationTint)
+                .frame(width: 46, height: 46)
+                .background(salutationTint.opacity(0.13), in: RoundedRectangle(cornerRadius: 12))
+            VStack(alignment: .leading, spacing: 4) {
+                Text("\(salutation)，\(session.displayUsername)")
+                    .font(.title3.weight(.bold))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.75)
+                Text("好内容不怕晚一点抵达，稳定才是长久的浪漫。")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+            }
+            Spacer(minLength: 8)
+            VStack(alignment: .trailing, spacing: 1) {
+                Text(Date.now, format: .dateTime.month().day())
+                    .font(.caption.weight(.semibold))
+                Text(Date.now, format: .dateTime.weekday(.abbreviated))
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+            .lineLimit(1)
         }
-        .padding(14)
+        .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(Color(uiColor: .secondarySystemGroupedBackground),
                     in: RoundedRectangle(cornerRadius: 14))
+        .overlay {
+            RoundedRectangle(cornerRadius: 14)
+                .strokeBorder(Color(uiColor: .separator).opacity(0.16), lineWidth: 0.5)
+        }
     }
 
     private var salutation: String {
@@ -88,6 +261,37 @@ struct DashboardView: View {
         case 14..<18: return "下午好"
         case 18..<23: return "晚上好"
         default: return "夜深了"
+        }
+    }
+
+    private var salutationIcon: String {
+        let hour = Calendar.current.component(.hour, from: Date())
+        switch hour {
+        case 5..<11: return "sun.horizon.fill"
+        case 11..<18: return "sun.max.fill"
+        case 18..<23: return "sunset.fill"
+        default: return "moon.stars.fill"
+        }
+    }
+
+    private var salutationTint: Color {
+        let hour = Calendar.current.component(.hour, from: Date())
+        switch hour {
+        case 5..<11: return .orange
+        case 11..<18: return .blue
+        case 18..<23: return .pink
+        default: return .indigo
+        }
+    }
+
+    @ViewBuilder
+    private func operationalGrid(metrics: JSONValue, drive: JSONValue,
+                                 progress: JSONValue) -> some View {
+        LazyVGrid(columns: [GridItem(.adaptive(minimum: 290), spacing: 12)],
+                  alignment: .leading, spacing: 12) {
+            deviceCard(metrics)
+            drive115Card(drive)
+            taskCard(progress)
         }
     }
 
@@ -111,37 +315,49 @@ struct DashboardView: View {
         let serverName = overview.first(of: "server_name", "serverName", "name").displayString ?? "Emby Server"
 
         if !stats.isNull {
-            CardSection(title: "媒体库总览", systemImage: "square.stack.3d.up",
-                        trailing: AnyView(StatusBadge(online ? "\(serverName) 在线" : "\(serverName) 离线",
-                                                      tone: online ? .good : .bad))) {
-                LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 10) {
-                    MetricTile(title: "电影", value: countText(movies), systemImage: "film", tone: .info)
-                    MetricTile(title: "电视剧", value: countText(series), systemImage: "tv", tone: .good)
-                    MetricTile(title: "剧集", value: countText(episodes), systemImage: "list.and.film", tone: .warning)
-                    MetricTile(title: "用户", value: countText(users), systemImage: "person.2", tone: .neutral)
+            DashboardPanel(title: "媒体库总览", systemImage: "square.stack.3d.up", tint: .blue,
+                           trailing: AnyView(StatusBadge(online ? "在线" : "离线",
+                                                         tone: online ? .good : .bad))) {
+                LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 14) {
+                    DashboardMetric(title: "电影", value: countText(movies),
+                                    systemImage: "film.fill", tint: .blue)
+                    DashboardMetric(title: "电视剧", value: countText(series),
+                                    systemImage: "tv.fill", tint: .green)
+                    DashboardMetric(title: "剧集", value: countText(episodes),
+                                    systemImage: "list.and.film", tint: .orange)
+                    DashboardMetric(title: "用户", value: countText(users),
+                                    systemImage: "person.2.fill", tint: .purple)
                 }
-                HStack(spacing: 12) {
-                    Label("Emby Server", systemImage: "server.rack")
+
+                Divider()
+
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 130), alignment: .leading)],
+                          alignment: .leading, spacing: 10) {
+                    DashboardMetaItem(text: serverName, systemImage: "server.rack", tint: .green)
                     if let version = session.serverVersion {
                         let number = version.trimmingCharacters(in: .whitespacesAndNewlines)
                             .drop(while: { $0 == "v" || $0 == "V" })
-                        Label("CineChill v\(number)", systemImage: "movieclapper")
+                        DashboardMetaItem(text: "CineChill v\(number)",
+                                          systemImage: "movieclapper.fill", tint: .blue)
                     }
-                    Label("\(libraryCount) 个媒体库", systemImage: "cylinder")
+                    DashboardMetaItem(text: "\(libraryCount) 个媒体库",
+                                      systemImage: "cylinder", tint: .orange)
                 }
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
+
                 if libraryCount > 0 {
-                    HStack(spacing: 8) {
-                        Text(Fmt.percent(Double(libraryCount) / Double(max(libraryLimit, 1))))
-                            .font(.caption.monospacedDigit())
-                            .foregroundStyle(.green)
-                        ProgressView(value: min(Double(libraryCount) / Double(max(libraryLimit, 1)), 1))
+                    let ratio = min(Double(libraryCount) / Double(max(libraryLimit, 1)), 1)
+                    VStack(alignment: .leading, spacing: 7) {
+                        HStack {
+                            Text("媒体库容量")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                            Spacer()
+                            Text("\(libraryCount) / \(libraryLimit)")
+                                .font(.caption.monospacedDigit())
+                                .foregroundStyle(.secondary)
+                        }
+                        ProgressView(value: ratio)
                             .tint(.green)
-                        Text("\(libraryCount) / \(libraryLimit)")
-                            .font(.caption.monospacedDigit())
-                            .foregroundStyle(.secondary)
                     }
                 }
             }
@@ -166,30 +382,37 @@ struct DashboardView: View {
             let network = networkNode.isNull ? metrics : networkNode
             let uptime = metrics.deepFirst(of: "uptime", "uptime_seconds", "boot_seconds")
 
-            CardSection(title: "服务器状态", systemImage: "cpu",
-                        trailing: AnyView(uptimeBadge(uptime))) {
-                VStack(alignment: .leading, spacing: 12) {
-                    GaugeRow(title: "CPU",
-                             ratio: Fmt.ratio(ratioValue(cpu)),
-                             caption: Fmt.percent(ratioValue(cpu), digits: 0))
+            DashboardPanel(title: "服务器状态", systemImage: "cpu", tint: .teal,
+                           trailing: AnyView(uptimeBadge(uptime))) {
+                VStack(alignment: .leading, spacing: 14) {
+                    DashboardGauge(title: "CPU",
+                                   caption: Fmt.percent(ratioValue(cpu), digits: 0),
+                                   systemImage: "cpu", tint: .teal,
+                                   ratio: Fmt.ratio(ratioValue(cpu)))
                     if let model = cpu.first(of: "model", "name", "brand").string {
-                        Text(model).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+                        Text(model)
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                            .padding(.leading, 41)
                     }
-                    GaugeRow(title: "内存",
-                             ratio: Fmt.ratio(ratioValue(memory)),
-                             caption: usedTotalText(memory))
-                    GaugeRow(title: "硬盘",
-                             ratio: Fmt.ratio(ratioValue(disk)),
-                             caption: usedTotalText(disk))
-                    HStack {
-                        Label("上行 " + uploadSpeedText(network),
-                              systemImage: "arrow.up")
-                        Spacer()
-                        Label("下行 " + downloadSpeedText(network),
-                              systemImage: "arrow.down")
+                    DashboardGauge(title: "内存", caption: usedTotalText(memory),
+                                   systemImage: "memorychip", tint: .blue,
+                                   ratio: Fmt.ratio(ratioValue(memory)))
+                    DashboardGauge(title: "硬盘", caption: usedTotalText(disk),
+                                   systemImage: "internaldrive", tint: .orange,
+                                   ratio: Fmt.ratio(ratioValue(disk)))
+
+                    Divider()
+
+                    HStack(spacing: 14) {
+                        DashboardMetaItem(text: "上行 " + uploadSpeedText(network),
+                                          systemImage: "arrow.up.right", tint: .orange)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                        DashboardMetaItem(text: "下行 " + downloadSpeedText(network),
+                                          systemImage: "arrow.down.left", tint: .green)
+                            .frame(maxWidth: .infinity, alignment: .leading)
                     }
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
                 }
             }
         }
@@ -250,18 +473,35 @@ struct DashboardView: View {
     @ViewBuilder
     private func drive115Card(_ drive: JSONValue) -> some View {
         if !drive.isNull, !drive.isEmptyContainer {
-            CardSection(title: "115 网盘", systemImage: "externaldrive.badge.icloud") {
-                VStack(spacing: 8) {
-                    if let name = drive.deepFirst(of: "user_name", "username", "name").displayString {
-                        KeyValueRow("账号", name)
+            let name = drive.deepFirst(of: "user_name", "username", "name").displayString
+            let vip = drive.deepFirst(of: "vip_name", "vip", "is_vip").displayString
+            let used = drive.deepFirst(of: "used", "used_size", "space_used")
+            let total = drive.deepFirst(of: "total", "total_size", "all_total", "space_total")
+            DashboardPanel(title: "115 网盘", systemImage: "externaldrive.badge.icloud", tint: .green,
+                           trailing: vip.map { AnyView(StatusBadge($0, tone: .good)) }) {
+                VStack(alignment: .leading, spacing: 14) {
+                    if let name, !name.isEmpty {
+                        HStack(spacing: 11) {
+                            Image(systemName: "person.crop.circle.fill")
+                                .font(.title2)
+                                .foregroundStyle(.green)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("当前账号")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                Text(name)
+                                    .font(.subheadline.weight(.semibold))
+                                    .lineLimit(1)
+                            }
+                        }
                     }
-                    let used = drive.deepFirst(of: "used", "used_size", "space_used")
-                    let total = drive.deepFirst(of: "total", "total_size", "all_total", "space_total")
                     if used.double != nil || total.double != nil {
-                        KeyValueRow("空间", "\(Fmt.bytes(used)) / \(Fmt.bytes(total))")
-                    }
-                    if let vip = drive.deepFirst(of: "vip_name", "vip", "is_vip").displayString {
-                        KeyValueRow("会员", vip)
+                        let ratio = (total.double ?? 0) > 0
+                            ? (used.double ?? 0) / (total.double ?? 1) : 0
+                        DashboardGauge(title: "存储空间",
+                                       caption: "\(Fmt.bytes(used)) / \(Fmt.bytes(total))",
+                                       systemImage: "externaldrive.fill", tint: .green,
+                                       ratio: ratio)
                     }
                 }
             }
@@ -273,35 +513,58 @@ struct DashboardView: View {
     @ViewBuilder
     private func taskCard(_ progress: JSONValue) -> some View {
         let running = TaskWatch.items(from: progress).filter { !$0.isFinished }
-        CardSection(title: "任务动态", systemImage: "bolt.horizontal") {
-            VStack(alignment: .leading, spacing: 8) {
+        DashboardPanel(title: "任务动态", systemImage: "bolt.horizontal.fill", tint: .orange,
+                       trailing: AnyView(StatusBadge(running.isEmpty ? "空闲" : "\(running.count) 项运行中",
+                                                     tone: running.isEmpty ? .neutral : .good))) {
+            VStack(alignment: .leading, spacing: 12) {
                 if running.isEmpty {
-                    Text("当前没有运行中的任务")
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
+                    HStack(spacing: 10) {
+                        Image(systemName: "checkmark.circle.fill")
+                            .foregroundStyle(.green)
+                        Text("当前没有运行中的任务")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    }
+                    .padding(.vertical, 4)
                 } else {
                     ForEach(Array(running.prefix(5).enumerated()), id: \.offset) { _, item in
-                        VStack(alignment: .leading, spacing: 4) {
-                            HStack {
-                                Text(item.name)
-                                    .font(.subheadline)
-                                Spacer()
-                                StatusBadge(item.status.isEmpty ? "运行中" : item.status,
-                                            tone: item.status.isEmpty ? .good : badgeTone(for: item.status))
-                            }
-                            if let percent = item.percent {
-                                ProgressView(value: Fmt.ratio(.double(percent)))
-                                Text(Fmt.percent(.double(percent), digits: 0))
-                                    .font(.caption2.monospacedDigit())
-                                    .foregroundStyle(.secondary)
+                        HStack(alignment: .top, spacing: 10) {
+                            Image(systemName: "bolt.fill")
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(.orange)
+                                .frame(width: 28, height: 28)
+                                .background(Color.orange.opacity(0.11),
+                                            in: RoundedRectangle(cornerRadius: 7))
+                            VStack(alignment: .leading, spacing: 6) {
+                                HStack {
+                                    Text(item.name)
+                                        .font(.subheadline.weight(.medium))
+                                        .lineLimit(1)
+                                    Spacer(minLength: 8)
+                                    StatusBadge(item.status.isEmpty ? "运行中" : item.status,
+                                                tone: item.status.isEmpty ? .good : badgeTone(for: item.status))
+                                }
+                                if let percent = item.percent {
+                                    HStack(spacing: 8) {
+                                        ProgressView(value: Fmt.ratio(.double(percent)))
+                                            .tint(.orange)
+                                        Text(Fmt.percent(.double(percent), digits: 0))
+                                            .font(.caption2.monospacedDigit())
+                                            .foregroundStyle(.secondary)
+                                    }
+                                }
                             }
                         }
                     }
                 }
+
+                Divider()
+
                 NavigationLink {
                     TaskCenterView()
                 } label: {
-                    Label("任务中心", systemImage: "list.bullet.rectangle").font(.caption)
+                    DashboardActionLabel(title: "任务中心",
+                                         systemImage: "list.bullet.rectangle", tint: .orange)
                 }
             }
         }
@@ -313,22 +576,25 @@ struct DashboardView: View {
     private func trendCard(_ overview: JSONValue) -> some View {
         let points = trendPoints(overview, days: trendDays)
         if !points.isEmpty {
-            CardSection(title: "入库趋势", systemImage: "chart.xyaxis.line",
-                        trailing: AnyView(
-                            Picker("趋势周期", selection: $trendDays) {
-                                Text("7天").tag(7)
-                                Text("30天").tag(30)
-                            }
-                            .pickerStyle(.segmented)
-                            .frame(width: 130)
-                        )) {
+            DashboardPanel(title: "入库趋势", systemImage: "chart.xyaxis.line", tint: .indigo,
+                           trailing: AnyView(
+                               Picker("趋势周期", selection: $trendDays) {
+                                   Text("7天").tag(7)
+                                   Text("30天").tag(30)
+                               }
+                               .pickerStyle(.segmented)
+                               .frame(width: 126)
+                           )) {
                 let total = points.reduce(0) { $0 + $1.total }
                 let movies = points.reduce(0) { $0 + $1.movie }
                 let series = points.reduce(0) { $0 + $1.series }
-                LazyVGrid(columns: Array(repeating: GridItem(.flexible()), count: 3), spacing: 8) {
-                    MetricTile(title: "全部", value: String(total), systemImage: "checklist", tone: .info)
-                    MetricTile(title: "电影", value: String(movies), systemImage: "film", tone: .good)
-                    MetricTile(title: "剧集", value: String(series), systemImage: "square.stack.3d.up", tone: .warning)
+                LazyVGrid(columns: Array(repeating: GridItem(.flexible()), count: 3), spacing: 10) {
+                    DashboardMetric(title: "全部", value: String(total),
+                                    systemImage: "checklist", tint: .indigo)
+                    DashboardMetric(title: "电影", value: String(movies),
+                                    systemImage: "film.fill", tint: .blue)
+                    DashboardMetric(title: "剧集", value: String(series),
+                                    systemImage: "square.stack.3d.up.fill", tint: .orange)
                 }
                 Chart(points) { point in
                     AreaMark(
@@ -383,7 +649,8 @@ struct DashboardView: View {
         let playbacks = overview.deepFirst(of: "recent_playbacks", "recentPlaybacks",
                                            "continue_watching", "continueWatching").array ?? []
         if !playbacks.isEmpty {
-            CardSection(title: "继续观看", systemImage: "play.circle") {
+            DashboardPanel(title: "继续观看", systemImage: "play.circle.fill", tint: .blue,
+                           trailing: AnyView(StatusBadge("\(playbacks.count) 部", tone: .info))) {
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(alignment: .top, spacing: 12) {
                         ForEach(Array(playbacks.prefix(20).enumerated()), id: \.offset) { _, item in
@@ -457,14 +724,21 @@ struct DashboardView: View {
     private func librariesCard(_ stats: JSONValue) -> some View {
         let libraries = stats.deepFirst(of: "libraries", "library_list", "views", "items").array ?? []
         if !libraries.isEmpty {
-            CardSection(title: "媒体库", systemImage: "rectangle.stack") {
-                VStack(spacing: 6) {
-                    ForEach(Array(libraries.prefix(20).enumerated()), id: \.offset) { _, item in
-                        HStack {
-                            Label(item.first(of: "name", "Name", "title").displayString
-                                  ?? item.displayString ?? "—",
-                                  systemImage: libraryIcon(item))
-                                .font(.subheadline)
+            DashboardPanel(title: "媒体库", systemImage: "rectangle.stack.fill", tint: .cyan,
+                           trailing: AnyView(StatusBadge("\(libraries.count) 个", tone: .info))) {
+                VStack(spacing: 0) {
+                    ForEach(Array(libraries.prefix(20).enumerated()), id: \.offset) { index, item in
+                        HStack(spacing: 11) {
+                            let tint = libraryTint(item)
+                            Image(systemName: libraryIcon(item))
+                                .font(.system(size: 14, weight: .semibold))
+                                .foregroundStyle(tint)
+                                .frame(width: 30, height: 30)
+                                .background(tint.opacity(0.11), in: RoundedRectangle(cornerRadius: 8))
+                            Text(item.first(of: "name", "Name", "title").displayString
+                                 ?? item.displayString ?? "—")
+                                .font(.subheadline.weight(.medium))
+                                .lineLimit(1)
                             Spacer()
                             let count = item.first(of: "count", "total", "item_count", "ItemCount")
                             if !count.isNull {
@@ -472,6 +746,10 @@ struct DashboardView: View {
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
                             }
+                        }
+                        .padding(.vertical, 7)
+                        if index < min(libraries.count, 20) - 1 {
+                            Divider().padding(.leading, 41)
                         }
                     }
                 }
@@ -486,7 +764,8 @@ struct DashboardView: View {
         let recent = overview.deepFirst(of: "recent_items", "recentItems", "recently_added",
                                         "recentlyAdded", "latest", "recent").array ?? []
         if !recent.isEmpty {
-            CardSection(title: "最近入库", systemImage: "clock.arrow.circlepath") {
+            DashboardPanel(title: "最近入库", systemImage: "clock.arrow.circlepath", tint: .orange,
+                           trailing: AnyView(StatusBadge("\(recent.count) 部", tone: .warning))) {
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(alignment: .top, spacing: 12) {
                         ForEach(Array(recent.prefix(24).enumerated()), id: \.offset) { _, item in
@@ -555,6 +834,14 @@ struct DashboardView: View {
         }
     }
 
+    private func libraryTint(_ item: JSONValue) -> Color {
+        switch item.first(of: "type", "collection_type", "CollectionType").displayString?.lowercased() {
+        case "movie", "movies": return .blue
+        case "series", "tv", "tvshows": return .green
+        default: return .orange
+        }
+    }
+
     private func mediaWebURL(_ item: JSONValue) -> URL? {
         guard let raw = item.first(of: "web_url", "webUrl", "url", "href").displayString,
               !raw.isEmpty else { return nil }
@@ -568,34 +855,44 @@ struct DashboardView: View {
         let snapshots = [value["stats"], value["metrics"], value["drive115"],
                          value["overview"], value["progress"], value["health"]]
         let available = snapshots.filter { !$0.isNull && !$0.isEmptyContainer }.count
-        return CardSection(title: "诊断", systemImage: "stethoscope",
-                           trailing: AnyView(
-                            StatusBadge("\(available)/\(snapshots.count) 可用",
-                                        tone: available == snapshots.count ? .good : .warning)
-            )) {
-            VStack(alignment: .leading, spacing: 10) {
+        return DashboardPanel(title: "诊断", systemImage: "stethoscope", tint: .red,
+                              trailing: AnyView(
+                                  StatusBadge("\(available)/\(snapshots.count) 可用",
+                                              tone: available == snapshots.count ? .good : .warning))) {
+            VStack(alignment: .leading, spacing: 0) {
                 NavigationLink {
                     DashboardEndpointDiagnosticsView()
                 } label: {
-                    Label("运行完整接口诊断", systemImage: "waveform.path.ecg")
+                    DashboardActionLabel(title: "运行完整接口诊断",
+                                         systemImage: "waveform.path.ecg", tint: .red)
                 }
+                .padding(.vertical, 6)
+                Divider().padding(.leading, 41)
                 NavigationLink {
                     SystemHealthView()
                 } label: {
-                    Label("系统健康检查", systemImage: "heart.text.square")
+                    DashboardActionLabel(title: "系统健康检查",
+                                         systemImage: "heart.text.square.fill", tint: .pink)
                 }
+                .padding(.vertical, 6)
+                Divider().padding(.leading, 41)
                 NavigationLink {
                     SystemLogsView()
                 } label: {
-                    Label("系统日志", systemImage: "doc.plaintext")
+                    DashboardActionLabel(title: "系统日志",
+                                         systemImage: "doc.text.fill", tint: .blue)
                 }
+                .padding(.vertical, 6)
+                Divider().padding(.leading, 41)
                 Button {
                     reload.fire()
                 } label: {
-                    Label("刷新仪表盘数据", systemImage: "arrow.clockwise")
+                    DashboardActionLabel(title: "刷新仪表盘数据",
+                                         systemImage: "arrow.clockwise", tint: .green,
+                                         showsChevron: false)
                 }
+                .padding(.vertical, 6)
             }
-            .font(.subheadline)
         }
     }
 
