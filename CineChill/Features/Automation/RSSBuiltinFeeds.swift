@@ -115,7 +115,8 @@ struct BuiltinRSSFeedDetailView: View {
     @State private var queryKey = 0
 
     var body: some View {
-        RemoteList(title: feed.title, subtitle: feed.note) {
+        RemoteList(title: feed.title, subtitle: feed.note,
+                   cacheKey: "rss-feed-\(feed.id)-\(queryKey)") {
             let api = try session.requireAPI()
             return try await feed.load(api: api, parameter: parameter)
         } content: { value, _ in

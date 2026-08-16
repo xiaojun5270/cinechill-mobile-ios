@@ -53,12 +53,18 @@ public final class AppSession: ObservableObject {
     }
 
     public func upsert(_ profile: ServerProfile, password: String?) {
+        let needsNewClient: Bool
         if let index = servers.firstIndex(where: { $0.id == profile.id }) {
+            let previous = servers[index]
+            needsNewClient = previous.baseURL != profile.baseURL
+                || previous.allowInsecureTLS != profile.allowInsecureTLS
+                || previous.username != profile.username
             servers[index] = profile
         } else {
+            needsNewClient = true
             servers.append(profile)
         }
-        clients[profile.id] = nil
+        if needsNewClient { clients[profile.id] = nil }
         if let password, profile.rememberPassword, !password.isEmpty {
             Keychain.save(password, account: profile.passwordAccount)
         } else if profile.rememberPassword == false {
@@ -124,14 +130,18 @@ public final class AppSession: ObservableObject {
                 authState = .loggedOut
                 throw APIError.server(status: 200, message: message)
             }
-            if let token = APIClient.extractToken(from: response) {
+            let token = APIClient.extractToken(from: response)
+            if let token {
                 client?.updateToken(token)
             }
             profile.username = username
             profile.lastUsedAt = Date()
             upsert(profile, password: profile.rememberPassword ? password : nil)
-            _ = await probeUserInfo(api)
-            await loadVersion(api)
+            if let token { client?.updateToken(token) }
+            let authenticatedAPI = self.api ?? api
+            async let userInfoLoaded = probeUserInfo(authenticatedAPI)
+            async let versionLoaded: Void = loadVersion(authenticatedAPI)
+            _ = await (userInfoLoaded, versionLoaded)
             authState = .loggedIn
             lastErrorMessage = nil
         } catch {
@@ -224,4 +234,3 @@ public enum Probe {
         (try? await operation()) ?? .null
     }
 }
-

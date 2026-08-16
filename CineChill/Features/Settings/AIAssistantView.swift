@@ -27,9 +27,10 @@ struct AIAssistantView: View {
     var body: some View {
         RemoteList(title: "AI 助手") {
             let api = try session.requireAPI()
-            let config = Self.unwrap(try await api.ai.readAiEpisodeResolverConfig())
+            async let configTask = api.ai.readAiEpisodeResolverConfig()
             async let runtimeTask = Probe.json { try await api.ai.readAiAssistantRuntime() }
             async let permissionsTask = Probe.json { try await api.ai.readAiAssistantToolPermissions() }
+            let config = Self.unwrap(try await configTask)
             let runtime = await runtimeTask
             let permissions = await permissionsTask
 

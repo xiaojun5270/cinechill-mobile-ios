@@ -77,8 +77,8 @@ struct SettingsView: View {
                           subtitle: "config.json 全量编辑与重启",
                           systemImage: "slider.horizontal.3",
                           tint: .gray) { ServerConfigView() }
-                ModuleRow(title: "资源与模板",
-                          subtitle: "字体、布局、模板、译名、套件",
+                ModuleRow(title: "封面系统",
+                          subtitle: "设计、自动任务、备份、资源与翻译",
                           systemImage: "paintpalette",
                           tint: .pink) { ResourcesView() }
             }

@@ -9,7 +9,7 @@ struct SubscriptionEventsView: View {
     private let types = ["", "matched", "subscribed", "downloaded", "failed"]
 
     var body: some View {
-        RemoteList(title: "订阅事件") {
+        RemoteList(title: "订阅事件", cacheKey: "subscription-events-\(queryKey)") {
             let api = try session.requireAPI()
             return try await api.subscriptions.listSubscriptionEvents(
                 limit: 200,
@@ -87,12 +87,13 @@ struct MoviePilotView: View {
     var body: some View {
         RemoteList(title: "MoviePilot") {
             let api = try session.requireAPI()
-            let config = await Probe.json { try await api.moviePilot.getMpConfig() }
+            async let configRequest = Probe.json { try await api.moviePilot.getMpConfig() }
             let subs = await Probe.json { try await api.moviePilot.mpListSubscriptions() }
             let requests = episodeProgressRequests(subs.list("subscriptions", "items", "data"))
             let progress = requests.isEmpty
                 ? JSONValue.object(["items": .array([])])
                 : await Probe.json { try await api.subscriptions.getEpisodeProgress(items: requests) }
+            let config = await configRequest
             return JSONValue.object([
                 "config": config,
                 "subscriptions": subs,
@@ -228,7 +229,7 @@ struct MoviePilotSubscriptionRecordsView: View {
     @State private var pending: PendingSubscriptionRecordClear?
 
     var body: some View {
-        RemoteList(title: title) {
+        RemoteList(title: title, cacheKey: "moviepilot-records-\(workspace)") {
             let api = try session.requireAPI()
             return try await api.moviePilot.mpListSubscriptions()
         } content: { value, reload in

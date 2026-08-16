@@ -7,24 +7,22 @@ struct TaskCenterView: View {
     @StateObject private var runner = ActionRunner()
 
     var body: some View {
-        RemoteList(title: "任务中心") {
+        RemoteList(title: "自动封面", refreshOnAppear: true) {
             let api = try session.requireAPI()
-            let progress = await Probe.json { try await api.tasks.getProgress() }
-            let saved = await Probe.json { try await api.tasks.getTasks() }
-            return JSONValue.object(["progress": progress, "saved": saved])
+            async let progress = Probe.json { try await api.tasks.getProgress() }
+            async let saved = Probe.json { try await api.tasks.getTasks() }
+            async let templates = Probe.json { try await api.resources.getTemplatesV2() }
+            let (progress, saved, templates) = await (progress, saved, templates)
+            return JSONValue.object(["progress": progress, "saved": saved, "templates": templates])
         } content: { value, reload in
             progressSection(value["progress"], reload: reload)
-            savedSection(value["saved"], reload: reload)
+            savedSection(value["saved"], templates: CoverData.templates(from: value["templates"]),
+                         reload: reload)
             Section {
                 NavigationLink {
                     TaskEditorView(existing: .null, reload: reload)
                 } label: {
                     Label("新建计划任务", systemImage: "plus.circle")
-                }
-                NavigationLink {
-                    SystemLogsView()
-                } label: {
-                    Label("系统日志", systemImage: "doc.plaintext")
                 }
             }
         }
@@ -150,7 +148,7 @@ struct TaskCenterView: View {
     // MARK: - 已保存任务
 
     @ViewBuilder
-    private func savedSection(_ saved: JSONValue, reload: Reload) -> some View {
+    private func savedSection(_ saved: JSONValue, templates: [JSONValue], reload: Reload) -> some View {
         let tasks = saved.list("tasks", "items")
         Section("计划任务") {
             if tasks.isEmpty { EmptyRow("没有已保存的任务") }
@@ -168,7 +166,22 @@ struct TaskCenterView: View {
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                     if let preset = task.first(of: "preset_filename", "preset").displayString {
-                        Text(preset).font(.caption2).foregroundStyle(.tertiary).lineLimit(1)
+                        if let template = templates.first(where: { CoverData.filename(of: $0) == preset }) {
+                            HStack(spacing: 10) {
+                                CoverArtworkView(value: template, contentMode: .fill,
+                                                 placeholderIcon: "photo.artframe")
+                                    .frame(width: 92, height: 54)
+                                    .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(TemplatesView.name(of: template).isEmpty
+                                         ? preset : TemplatesView.name(of: template))
+                                        .font(.caption.weight(.medium)).lineLimit(1)
+                                    Text(preset).font(.caption2).foregroundStyle(.tertiary).lineLimit(1)
+                                }
+                            }
+                        } else {
+                            Text(preset).font(.caption2).foregroundStyle(.tertiary).lineLimit(1)
+                        }
                     }
                     HStack(spacing: 14) {
                         NavigationLink("编辑") {
@@ -222,7 +235,7 @@ struct TaskEditorView: View {
     @State private var autoInclude: Bool
     @State private var selected: Set<String>
     @State private var libraries: [JSONValue] = []
-    @State private var presets: [String] = []
+    @State private var presets: [JSONValue] = []
     @State private var manualLibraryID = ""
     @State private var manualLibraryName = ""
     @State private var connection: ConnectionRequest?
@@ -284,14 +297,32 @@ struct TaskEditorView: View {
 
     @ViewBuilder
     private var presetSection: some View {
-        Section("预设文件") {
-            if !presets.isEmpty {
-                Picker("预设", selection: $preset) {
-                    Text("未选择").tag("")
-                    ForEach(presets, id: \.self) { Text($0).tag($0) }
+        Section("封面模板") {
+            ForEach(Array(presets.enumerated()), id: \.offset) { _, template in
+                let filename = CoverData.filename(of: template)
+                Button {
+                    preset = filename
+                } label: {
+                    HStack(spacing: 12) {
+                        CoverArtworkView(value: template, contentMode: .fill,
+                                         placeholderIcon: "photo.artframe")
+                            .frame(width: 104, height: 62)
+                            .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(TemplatesView.name(of: template).isEmpty
+                                 ? filename : TemplatesView.name(of: template))
+                                .foregroundStyle(.primary)
+                            Text(filename).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+                        }
+                        Spacer()
+                        if preset == filename {
+                            Image(systemName: "checkmark.circle.fill").foregroundStyle(Color.accentColor)
+                        }
+                    }
                 }
+                .disabled(filename.isEmpty)
             }
-            TextField("preset_filename", text: $preset)
+            TextField("模板文件名", text: $preset)
                 .textInputAutocapitalization(.never)
                 .autocorrectionDisabled()
         }
@@ -310,7 +341,11 @@ struct TaskEditorView: View {
                 Button {
                     if selected.contains(id) { selected.remove(id) } else { selected.insert(id) }
                 } label: {
-                    HStack {
+                    HStack(spacing: 12) {
+                        CoverArtworkView(value: library, contentMode: .fill,
+                                         placeholderIcon: "rectangle.stack")
+                            .frame(width: 84, height: 50)
+                            .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
                         VStack(alignment: .leading, spacing: 2) {
                             Text(libraryName(library)).foregroundStyle(.primary)
                             Text(id).font(.caption2).foregroundStyle(.secondary)
@@ -347,9 +382,6 @@ struct TaskEditorView: View {
             }
             .disabled(runner.isRunning || preset.isEmpty || targets().isEmpty)
 
-            if !runner.lastResult.isNull {
-                JSONInspector(value: runner.lastResult, title: "接口返回")
-            }
         } footer: {
             Text("已选择 \(targets().count) 个媒体库。保存格式与 Web 端任务配置一致。")
         }
@@ -370,14 +402,14 @@ struct TaskEditorView: View {
         library.first(of: "library_name", "name", "Name", "title").displayString ?? "未命名"
     }
 
-    /// 媒体库来自 Emby 封面接口，预设来自主题套装列表；任何一步失败都不影响手动填写。
+    /// 媒体库来自 Emby 封面接口，模板来自封面模板接口；任何一步失败都不影响手动填写。
     private func loadOptions() async {
         guard let api = session.api else { return }
-        let suites = await Probe.json { try await api.resources.listSuites() }
-        presets = suites.list("suites", "items", "data").compactMap {
-            $0.first(of: "filename", "file", "name").displayString
-        }
-        guard let connection = await EmbyConnection.load(api: api) else { return }
+        async let templatesRequest = Probe.json { try await api.resources.getTemplatesV2() }
+        async let connectionRequest = EmbyConnection.load(api: api)
+        let (templates, loadedConnection) = await (templatesRequest, connectionRequest)
+        presets = CoverData.templates(from: templates)
+        guard let connection = loadedConnection else { return }
         self.connection = connection
         let covers = await Probe.json { try await api.server.getLibraryCovers(connection) }
         var list = covers.list("libraries", "items", "data", "views")
@@ -466,7 +498,7 @@ struct SystemLogsView: View {
     private let levels = ["ALL", "ERROR", "WARNING", "INFO", "DEBUG"]
 
     var body: some View {
-        RemoteList(title: "系统日志") {
+        RemoteList(title: "系统日志", cacheKey: "system-logs-\(queryKey)", refreshOnAppear: true) {
             let api = try session.requireAPI()
             return try await api.tasks.getSystemLogs(
                 level: level,

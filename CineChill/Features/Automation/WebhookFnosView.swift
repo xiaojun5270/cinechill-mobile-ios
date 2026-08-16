@@ -11,10 +11,11 @@ struct WebhookView: View {
     @State private var deleteSync = true
 
     var body: some View {
-        RemoteList(title: "Webhook") {
+        RemoteList(title: "Webhook", refreshOnAppear: true) {
             let api = try session.requireAPI()
-            let config = await Probe.json { try await api.webhook.getWebhookConfig() }
-            let queue = await Probe.json { try await api.webhook.getWebhookQueue() }
+            async let config = Probe.json { try await api.webhook.getWebhookConfig() }
+            async let queue = Probe.json { try await api.webhook.getWebhookQueue() }
+            let (config, queue) = await (config, queue)
             return JSONValue.object(["config": config, "queue": queue])
         } content: { value, reload in
             Section("配置") {

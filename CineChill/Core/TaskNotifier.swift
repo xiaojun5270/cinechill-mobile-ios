@@ -341,13 +341,23 @@ public final class TaskNotifier: ObservableObject {
 
     /// 前台轮询：开着通知时，每 45 秒对一次进度，这样不进后台也能收到提示。
     public func pollWhileActive(session: AppSession) async {
+        // 登录后先让首屏数据完成，避免通知轮询与仪表盘同时抢占连接。
+        do {
+            try await Task.sleep(nanoseconds: 12 * 1_000_000_000)
+        } catch {
+            return
+        }
         while !Task.isCancelled {
             if isEnabled, let api = session.api, session.authState == .loggedIn {
                 _ = await TaskWatch.run(api: api)
                 lastResult = defaults.string(forKey: TaskWatch.Key.lastResult)
                 lastCheck = Date()
             }
-            try? await Task.sleep(nanoseconds: 45 * 1_000_000_000)
+            do {
+                try await Task.sleep(nanoseconds: 45 * 1_000_000_000)
+            } catch {
+                return
+            }
         }
     }
 }

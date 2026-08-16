@@ -442,7 +442,7 @@ struct SeasonDetailView: View {
     @EnvironmentObject private var session: AppSession
 
     var body: some View {
-        RemoteList(title: title) {
+        RemoteList(title: title, cacheKey: "season-\(tmdbID)-\(seasonNumber)") {
             let api = try session.requireAPI()
             return try await api.discover.seasonDetail(tmdbId: tmdbID, seasonNum: seasonNumber)
         } content: { value, _ in

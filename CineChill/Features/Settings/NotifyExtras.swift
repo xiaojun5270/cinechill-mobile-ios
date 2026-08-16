@@ -70,8 +70,10 @@ struct TelegramDialogsView: View {
     var body: some View {
         RemoteList(title: "监听会话") {
             let api = try session.requireAPI()
-            let dialogs = try await api.notify.listTelegramDialogs()
-            let config = await Probe.json { try await api.notify.getTelegramNotifyConfig() }
+            async let dialogsRequest = api.notify.listTelegramDialogs()
+            async let configRequest = Probe.json { try await api.notify.getTelegramNotifyConfig() }
+            let dialogs = try await dialogsRequest
+            let config = await configRequest
             return .object(["dialogs": dialogs, "config": config])
         } content: { value, reload in
             let loadedDialogs = value["dialogs"].list("dialogs", "items", "data", "chats")
@@ -197,15 +199,17 @@ struct WechatNotifyView: View {
     var body: some View {
         RemoteList(title: "企业微信") {
             let api = try session.requireAPI()
-            let config = await Probe.json { try await api.notify.getWechatNotifyConfig() }
-            let unifiedTypes = await Probe.json { try await api.notify.getNotificationTypes() }
+            async let configRequest = Probe.json { try await api.notify.getWechatNotifyConfig() }
+            async let typesRequest = Probe.json { try await api.notify.getNotificationTypes() }
+            async let defaultsRequest = Probe.json { try await api.notify.getNotificationDefaultTemplates() }
+            let unifiedTypes = await typesRequest
             let types: JSONValue
             if NotificationSettingsData.typeDefinitions(from: unifiedTypes).isEmpty {
                 types = await Probe.json { try await api.notify.getWechatNotificationTypes() }
             } else {
                 types = unifiedTypes
             }
-            let defaults = await Probe.json { try await api.notify.getNotificationDefaultTemplates() }
+            let (config, defaults) = await (configRequest, defaultsRequest)
             return JSONValue.object(["config": config, "types": types, "defaults": defaults])
         } content: { value, reload in
             Section("基础") {

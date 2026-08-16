@@ -16,8 +16,9 @@ struct ForwardView: View {
     var body: some View {
         RemoteList(title: "资源转发") {
             let api = try session.requireAPI()
-            let config = await Probe.json { try await api.forward.getConfig() }
-            let sources = await Probe.json { try await api.forward.getSearchSources() }
+            async let config = Probe.json { try await api.forward.getConfig() }
+            async let sources = Probe.json { try await api.forward.getSearchSources() }
+            let (config, sources) = await (config, sources)
             return JSONValue.object(["config": config, "sources": sources])
         } content: { value, reload in
             let widgetToken = value["config"].deepFirst(of: "widget_token", "token").displayString ?? ""
@@ -289,7 +290,7 @@ struct ForwardResourcesView: View {
     }
 
     var body: some View {
-        RemoteList(title: "已转发资源") {
+        RemoteList(title: "已转发资源", cacheKey: "forward-resources-\(queryKey)") {
             let api = try session.requireAPI()
             let token = effectiveToken
             return try await api.forward.loadForwardResources(token: token.isEmpty ? nil : token)
@@ -525,4 +526,3 @@ struct ForwardResourceDetailView: View {
         if let value = resource.first(of: "episode", "episode_number").int { episode = String(value) }
     }
 }
-

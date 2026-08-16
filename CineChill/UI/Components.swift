@@ -1,5 +1,6 @@
 import SwiftUI
 import UIKit
+import ImageIO
 
 // MARK: - 文本与状态
 
@@ -193,6 +194,7 @@ public struct GaugeRow: View {
 final class ImageMemoryCache {
     static let shared = ImageMemoryCache()
     private let cache = NSCache<NSString, UIImage>()
+    private var inFlight: [String: Task<UIImage?, Never>] = [:]
 
     private init() {
         cache.countLimit = 400
@@ -205,6 +207,39 @@ final class ImageMemoryCache {
         let cost = image.cgImage.map { $0.bytesPerRow * $0.height } ?? 0
         cache.setObject(image, forKey: key as NSString, cost: cost)
     }
+
+    func load(key: String, maxPixelSize: Int,
+              fetch: @escaping () async throws -> Data) async -> UIImage? {
+        if let cached = image(for: key) { return cached }
+        if let running = inFlight[key] { return await running.value }
+
+        let task = Task<UIImage?, Never> {
+            guard let data = try? await fetch() else { return nil }
+            return await Task.detached(priority: .utility) {
+                Self.downsample(data, maxPixelSize: maxPixelSize)
+            }.value
+        }
+        inFlight[key] = task
+        let decoded = await task.value
+        inFlight[key] = nil
+        if let decoded { store(decoded, for: key) }
+        return decoded
+    }
+
+    nonisolated private static func downsample(_ data: Data, maxPixelSize: Int) -> UIImage? {
+        let sourceOptions = [kCGImageSourceShouldCache: false] as CFDictionary
+        guard let source = CGImageSourceCreateWithData(data as CFData, sourceOptions) else { return nil }
+        let options: [CFString: Any] = [
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceCreateThumbnailWithTransform: true,
+            kCGImageSourceThumbnailMaxPixelSize: max(maxPixelSize, 1),
+            kCGImageSourceShouldCacheImmediately: true
+        ]
+        guard let image = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) else {
+            return nil
+        }
+        return UIImage(cgImage: image)
+    }
 }
 
 /// 走当前服务器会话加载图片（图片代理接口需要 Cookie/Token）。
@@ -212,15 +247,18 @@ public struct RemoteImage: View {
     let url: URL?
     var contentMode: ContentMode = .fill
     var placeholderIcon: String = "photo"
+    var maxPixelSize: Int = 1_600
 
     @EnvironmentObject private var session: AppSession
     @State private var image: UIImage?
     @State private var failed = false
 
-    public init(url: URL?, contentMode: ContentMode = .fill, placeholderIcon: String = "photo") {
+    public init(url: URL?, contentMode: ContentMode = .fill, placeholderIcon: String = "photo",
+                maxPixelSize: Int = 1_600) {
         self.url = url
         self.contentMode = contentMode
         self.placeholderIcon = placeholderIcon
+        self.maxPixelSize = maxPixelSize
     }
 
     public var body: some View {
@@ -239,30 +277,31 @@ public struct RemoteImage: View {
             }
         }
         .clipped()
-        .task(id: url?.absoluteString) { await load() }
+        .task(id: cacheKey) { await load() }
+    }
+
+    private var cacheKey: String {
+        let server = session.activeServer
+        let identity = "\(server?.id.uuidString ?? "no-server")|\(server?.username ?? "")"
+        return "\(identity)|\(url?.absoluteString ?? "nil")|\(maxPixelSize)"
     }
 
     private func load() async {
+        image = nil
+        failed = false
         guard let url else { return }
-        let key = url.absoluteString
-        if let cached = ImageMemoryCache.shared.image(for: key) {
-            image = cached
-            return
-        }
-        do {
-            let data: Data
-            if let client = session.client {
-                data = try await client.data(from: url, timeout: 30)
+        let client = session.client
+        let loaded = await ImageMemoryCache.shared.load(key: cacheKey, maxPixelSize: maxPixelSize) {
+            if let client {
+                return try await client.data(from: url, timeout: 30)
             } else {
-                data = try await URLSession.shared.data(from: url).0
+                return try await URLSession.shared.data(from: url).0
             }
-            guard let decoded = UIImage(data: data) else {
-                failed = true
-                return
-            }
-            ImageMemoryCache.shared.store(decoded, for: key)
-            image = decoded
-        } catch {
+        }
+        guard !Task.isCancelled else { return }
+        if let loaded {
+            image = loaded
+        } else {
             failed = true
         }
     }
@@ -287,7 +326,8 @@ public struct PosterCard: View {
 
     public var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            RemoteImage(url: url, placeholderIcon: "film")
+            RemoteImage(url: url, placeholderIcon: "film",
+                        maxPixelSize: max(Int(width * 3), 360))
                 .frame(width: width, height: width * 1.5)
                 .clipShape(RoundedRectangle(cornerRadius: 10))
                 .overlay(alignment: .topLeading) {

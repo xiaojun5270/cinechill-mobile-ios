@@ -8,10 +8,11 @@ struct Upload115View: View {
     @State private var editing: UploadTaskDraft?
 
     var body: some View {
-        RemoteList(title: "115秒传") {
+        RemoteList(title: "115秒传", refreshOnAppear: true) {
             let api = try session.requireAPI()
-            let tasks = await Probe.json { try await api.upload115.getTasks() }
-            let status = await Probe.json { try await api.upload115.getStatus() }
+            async let tasks = Probe.json { try await api.upload115.getTasks() }
+            async let status = Probe.json { try await api.upload115.getStatus() }
+            let (tasks, status) = await (tasks, status)
             return JSONValue.object(["tasks": tasks, "status": status])
         } content: { value, reload in
             let status = value["status"]
@@ -136,7 +137,7 @@ struct UploadTaskStatusView: View {
     @StateObject private var runner = ActionRunner()
 
     var body: some View {
-        RemoteList(title: name) {
+        RemoteList(title: name, cacheKey: "upload-status-\(taskID)", refreshOnAppear: true) {
             let api = try session.requireAPI()
             return try await api.upload115.getTaskStatus(taskId: taskID)
         } content: { value, reload in

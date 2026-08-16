@@ -2,63 +2,208 @@ import SwiftUI
 import UIKit
 import UniformTypeIdentifiers
 
-/// 素材与模板总览：字体、布局、模板、译名、套装备份、登录海报、海报套用。
+/// 封面系统入口，与 Web 端的封面设计、自动封面、备份、资源和翻译模块对应。
 struct ResourcesView: View {
     @EnvironmentObject private var session: AppSession
 
     var body: some View {
-        RemoteList(title: "素材与模板") {
+        RemoteList(title: "封面系统") {
             let api = try session.requireAPI()
-            let fonts = await Probe.json { try await api.resources.getFonts() }
-            let layouts = await Probe.json { try await api.resources.getLayouts() }
-            let templates = await Probe.json { try await api.resources.getTemplatesV2() }
-            let suites = await Probe.json { try await api.resources.listSuites() }
-            return JSONValue.object(["fonts": fonts, "layouts": layouts,
-                                     "templates": templates, "suites": suites])
+            async let templates = Probe.json { try await api.resources.getTemplatesV2() }
+            async let suites = Probe.json { try await api.resources.listSuites() }
+            async let tasks = Probe.json { try await api.tasks.getTasks() }
+            let (templates, suites, tasks) = await (templates, suites, tasks)
+            return JSONValue.object(["templates": templates, "suites": suites, "tasks": tasks])
         } content: { value, _ in
-            let fonts = value["fonts"].list("fonts", "items", "data")
-            let layouts = value["layouts"].list("layouts", "items", "data")
-            let templates = value["templates"].list("templates", "items", "data")
+            let templates = CoverData.templates(from: value["templates"])
             let suites = value["suites"].list("suites", "items", "data")
+            let tasks = value["tasks"].list("tasks", "items", "data")
 
-            Section("素材") {
-                ModuleRow(title: "字体",
-                          subtitle: "\(fonts.count) 个可用字体",
-                          systemImage: "textformat",
-                          tint: .indigo) { FontsView() }
-                ModuleRow(title: "布局",
-                          subtitle: "\(layouts.count) 套排版布局",
-                          systemImage: "square.grid.2x2",
-                          tint: .teal) { LayoutsView() }
-                ModuleRow(title: "模板",
-                          subtitle: "\(templates.count) 个海报模板",
-                          systemImage: "photo.artframe",
-                          tint: .orange) { TemplatesView() }
+            if !templates.isEmpty {
+                Section("模板预览") {
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(alignment: .top, spacing: 12) {
+                            ForEach(Array(templates.prefix(12).enumerated()), id: \.offset) { _, template in
+                                CoverTemplatePreview(template: template)
+                            }
+                        }
+                        .padding(.vertical, 2)
+                    }
+                }
             }
 
-            Section("文本与备份") {
-                ModuleRow(title: "译名表",
-                          subtitle: "媒体库名称翻译",
-                          systemImage: "character.book.closed",
-                          tint: .brown) { TranslationsView() }
-                ModuleRow(title: "套装备份",
-                          subtitle: "\(suites.count) 个套装",
-                          systemImage: "shippingbox",
-                          tint: .purple) { SuitesView() }
-            }
-
-            Section("海报") {
-                ModuleRow(title: "登录页海报",
-                          subtitle: "登录背景取图来源",
-                          systemImage: "rectangle.on.rectangle",
-                          tint: .pink) { LoginPostersView() }
-                ModuleRow(title: "预览与套用",
+            Section("功能") {
+                ModuleRow(title: "封面设计",
                           subtitle: "生成媒体库封面并写回 Emby",
                           systemImage: "wand.and.rays",
                           tint: .blue) { PosterApplyView() }
+                ModuleRow(title: "自动封面",
+                          subtitle: "\(tasks.count) 个定时任务",
+                          systemImage: "sparkles",
+                          tint: .indigo) { TaskCenterView() }
+                ModuleRow(title: "封面备份",
+                          subtitle: "\(suites.count) 个快照套件",
+                          systemImage: "archivebox",
+                          tint: .purple) { SuitesView() }
+                ModuleRow(title: "资源配置",
+                          subtitle: "\(templates.count) 个可视化模板",
+                          systemImage: "slider.horizontal.3",
+                          tint: .orange) { CoverResourceConfigView() }
+                ModuleRow(title: "翻译配置",
+                          subtitle: "设置封面主标题与副标题",
+                          systemImage: "character.book.closed",
+                          tint: .teal) { TranslationsView() }
+            }
+        }
+    }
+}
+
+/// 字体、布局、模板和登录海报资源的集中入口。
+struct CoverResourceConfigView: View {
+    @EnvironmentObject private var session: AppSession
+
+    var body: some View {
+        RemoteList(title: "资源配置") {
+            let api = try session.requireAPI()
+            async let fonts = Probe.json { try await api.resources.getFonts() }
+            async let layouts = Probe.json { try await api.resources.getLayouts() }
+            async let templates = Probe.json { try await api.resources.getTemplatesV2() }
+            let (fonts, layouts, templates) = await (fonts, layouts, templates)
+            return .object(["fonts": fonts, "layouts": layouts, "templates": templates])
+        } content: { value, _ in
+            let fonts = value["fonts"].list("fonts", "items", "data")
+            let layouts = CoverData.layouts(from: value["layouts"])
+            let templates = CoverData.templates(from: value["templates"])
+
+            Section("封面资源") {
+                ModuleRow(title: "封面模板", subtitle: "\(templates.count) 个模板",
+                          systemImage: "photo.artframe", tint: .orange) { TemplatesView() }
+                ModuleRow(title: "排版布局", subtitle: "\(layouts.count) 套布局",
+                          systemImage: "rectangle.3.group", tint: .teal) { LayoutsView() }
+                ModuleRow(title: "字体", subtitle: "\(fonts.count) 个字体",
+                          systemImage: "textformat", tint: .indigo) { FontsView() }
+                ModuleRow(title: "登录页海报", subtitle: "查看登录背景图片",
+                          systemImage: "photo.on.rectangle.angled", tint: .pink) { LoginPostersView() }
             }
 
-            Section { JSONInspector(value: value) }
+            if !templates.isEmpty {
+                Section("模板封面") {
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(alignment: .top, spacing: 12) {
+                            ForEach(Array(templates.prefix(16).enumerated()), id: \.offset) { _, template in
+                                CoverTemplatePreview(template: template)
+                            }
+                        }
+                        .padding(.vertical, 2)
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// 兼容 v71 的分组模板结构和旧版本的扁平数组。
+enum CoverData {
+    static func templates(from value: JSONValue) -> [JSONValue] {
+        if let raw = value["all_raw"].array, !raw.isEmpty { return raw }
+        if let groups = value["data"].array {
+            let flattened = groups.flatMap { group -> [JSONValue] in
+                let engine = group.first(of: "layout", "engine").displayString
+                return (group["presets"].array ?? []).map { preset in
+                    guard let engine, preset["engine"].isNull else { return preset }
+                    var normalized = preset
+                    normalized["engine"] = .string(engine)
+                    return normalized
+                }
+            }
+            if !flattened.isEmpty { return flattened }
+        }
+        return value.list("templates", "items", "presets")
+    }
+
+    static func layouts(from value: JSONValue) -> [(key: String, value: JSONValue)] {
+        if let object = value["layouts"].object {
+            return object.keys.sorted().map { ($0, object[$0] ?? .null) }
+        }
+        return value.list("layouts", "items", "data").enumerated().map { index, layout in
+            (layout.first(of: "name", "id", "engine").displayString ?? "布局 \(index + 1)", layout)
+        }
+    }
+
+    static func filename(of template: JSONValue) -> String {
+        template.first(of: "filename", "file", "id", "template_filename").displayString ?? ""
+    }
+
+    static func embeddedImage(in value: JSONValue) -> UIImage? {
+        guard let raw = value.deepFirst(of: "image_data", "base64", "preview", "image").string,
+              !raw.hasPrefix("http://"), !raw.hasPrefix("https://"), !raw.hasPrefix("/") else {
+            return nil
+        }
+        let encoded = raw.contains(",") ? String(raw.split(separator: ",").last ?? "") : raw
+        guard encoded.count > 80,
+              let data = Data(base64Encoded: encoded, options: .ignoreUnknownCharacters) else { return nil }
+        return UIImage(data: data)
+    }
+
+    @MainActor
+    static func imageURL(in value: JSONValue, session: AppSession) -> URL? {
+        let raw = value.deepFirst(of: "image_url", "preview_image", "preview_url", "cover_url",
+                                  "poster_url", "thumbnail_url", "image", "cover", "poster",
+                                  "thumbnail", "url", "src").string
+        guard let raw, !raw.isEmpty, !raw.hasPrefix("data:"), raw.count < 4096 else { return nil }
+        guard let url = session.absoluteURL(raw) else { return nil }
+        guard let version = value.first(of: "image_mtime", "mtime", "updated_at").displayString,
+              !version.isEmpty, var parts = URLComponents(url: url, resolvingAgainstBaseURL: false) else {
+            return url
+        }
+        var query = parts.queryItems ?? []
+        query.append(URLQueryItem(name: "cover_v", value: version))
+        parts.queryItems = query
+        return parts.url ?? url
+    }
+}
+
+struct CoverArtworkView: View {
+    let value: JSONValue
+    var contentMode: ContentMode = .fill
+    var placeholderIcon = "photo"
+
+    @EnvironmentObject private var session: AppSession
+
+    var body: some View {
+        Group {
+            if let image = CoverData.embeddedImage(in: value) {
+                Image(uiImage: image)
+                    .resizable()
+                    .aspectRatio(contentMode: contentMode)
+            } else {
+                RemoteImage(url: CoverData.imageURL(in: value, session: session),
+                            contentMode: contentMode,
+                            placeholderIcon: placeholderIcon)
+            }
+        }
+        .clipped()
+    }
+}
+
+struct CoverTemplatePreview: View {
+    let template: JSONValue
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            CoverArtworkView(value: template, contentMode: .fill, placeholderIcon: "photo.artframe")
+                .frame(width: 144, height: 84)
+                .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
+            Text(TemplatesView.name(of: template).isEmpty ? "未命名模板" : TemplatesView.name(of: template))
+                .font(.caption.weight(.medium))
+                .lineLimit(1)
+                .frame(width: 144, alignment: .leading)
+            if let engine = template.first(of: "engine", "layout").displayString {
+                Text(engine)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
         }
     }
 }
@@ -108,9 +253,7 @@ struct FontsView: View {
                     }
                 }
             }
-
-            Section { JSONInspector(value: value) }
-                .fileImporter(isPresented: $importing,
+            .fileImporter(isPresented: $importing,
                               allowedContentTypes: [.font, .data]) { result in
                     switch result {
                     case .success(let url):
@@ -168,21 +311,32 @@ struct LayoutsView: View {
             let api = try session.requireAPI()
             return try await api.resources.getLayouts()
         } content: { value, _ in
-            let layouts = value.list("layouts", "items", "data")
+            let layouts = CoverData.layouts(from: value)
             Section("布局（\(layouts.count)）") {
                 if layouts.isEmpty { EmptyRow("没有布局") }
-                ForEach(Array(layouts.enumerated()), id: \.offset) { _, layout in
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(layout.first(of: "name", "label", "id").displayString
-                             ?? layout.string ?? "—")
-                            .font(.subheadline)
-                        if let desc = layout.first(of: "description", "desc", "detail").displayString {
-                            Text(desc).font(.caption2).foregroundStyle(.secondary).lineLimit(2)
+                ForEach(Array(layouts.enumerated()), id: \.offset) { _, entry in
+                    HStack(spacing: 12) {
+                        Image(systemName: "rectangle.3.group")
+                            .font(.title3)
+                            .foregroundStyle(.teal)
+                            .frame(width: 44, height: 44)
+                            .background(Color.teal.opacity(0.1), in: RoundedRectangle(cornerRadius: 7))
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(entry.key).font(.subheadline.weight(.medium))
+                            let groups = entry.value.array ?? entry.value["groups"].array ?? []
+                            let fieldCount = groups.reduce(0) { partial, group in
+                                partial + (group["items"].array?.count ?? 0)
+                            }
+                            if fieldCount > 0 {
+                                Text("\(groups.count) 组 · \(fieldCount) 个可配置参数")
+                                    .font(.caption2).foregroundStyle(.secondary)
+                            } else if let desc = entry.value.first(of: "description", "desc", "detail").displayString {
+                                Text(desc).font(.caption2).foregroundStyle(.secondary).lineLimit(2)
+                            }
                         }
                     }
                 }
             }
-            Section { JSONInspector(value: value) }
         }
     }
 }
@@ -198,7 +352,7 @@ struct TemplatesView: View {
             let api = try session.requireAPI()
             return try await api.resources.getTemplatesV2()
         } content: { value, reload in
-            let templates = value.list("templates", "items", "data")
+            let templates = CoverData.templates(from: value)
 
             Section {
                 NavigationLink {
@@ -215,30 +369,37 @@ struct TemplatesView: View {
                 if templates.isEmpty { EmptyRow("没有模板") }
                 ForEach(Array(templates.enumerated()), id: \.offset) { _, template in
                     let name = Self.name(of: template)
-                    HStack {
+                    let filename = CoverData.filename(of: template)
+                    HStack(spacing: 12) {
+                        CoverArtworkView(value: template, contentMode: .fill, placeholderIcon: "photo.artframe")
+                            .frame(width: 112, height: 66)
+                            .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
                         NavigationLink {
                             TemplateEditorView(template: template, reload: reload)
                         } label: {
                             VStack(alignment: .leading, spacing: 2) {
                                 Text(name.isEmpty ? "未命名模板" : name)
                                     .font(.subheadline)
-                                if let layout = template.first(of: "layout", "type", "mode").displayString {
+                                if let layout = template.first(of: "engine", "layout", "type", "mode").displayString {
                                     Text(layout).font(.caption2).foregroundStyle(.secondary)
+                                }
+                                if !filename.isEmpty {
+                                    Text(filename).font(.caption2).foregroundStyle(.tertiary).lineLimit(1)
                                 }
                             }
                         }
-                        if !name.isEmpty {
-                            Button("删除") { deleting = name }
-                                .font(.caption)
+                        if !filename.isEmpty {
+                            Button { deleting = filename } label: {
+                                Image(systemName: "trash")
+                            }
                                 .buttonStyle(.borderless)
                                 .foregroundStyle(.red)
+                                .accessibilityLabel("删除模板")
                         }
                     }
                 }
             }
-
-            Section { JSONInspector(value: value) }
-                .confirmationDialog("删除模板？",
+            .confirmationDialog("删除模板？",
                                     isPresented: Binding(get: { deleting != nil },
                                                          set: { if !$0 { deleting = nil } }),
                                     titleVisibility: .visible) {
@@ -248,9 +409,7 @@ struct TemplatesView: View {
                         runner.run("已删除", operation: {
                             let api = try session.requireAPI()
                             return try await api.resources.deleteTemplate(
-                                .object(["name": .string(target),
-                                         "id": .string(target),
-                                         "template_name": .string(target)]))
+                                .object(["filename": .string(target)]))
                         }, onSuccess: { await reload() })
                     }
                     Button("取消", role: .cancel) { deleting = nil }
@@ -266,8 +425,11 @@ struct TemplatesView: View {
 
     /// 用已有模板的字段结构生成一个空模板，避免凭空猜服务端需要哪些键。
     static func blank(like sample: JSONValue?) -> JSONValue {
-        guard let object = sample?.object else { return .object(["name": .string("")]) }
-        return .object(object.mapValues { existing in
+        guard let object = sample?.object else {
+            return .object(["filename": .string(""), "name": .string(""),
+                            "engine": .string("classic"), "config": .object([:])])
+        }
+        var draft: [String: JSONValue] = object.mapValues { existing -> JSONValue in
             switch existing {
             case .string: return .string("")
             case .int: return .int(0)
@@ -276,7 +438,13 @@ struct TemplatesView: View {
             case .array: return .array([])
             default: return existing
             }
-        })
+        }
+        draft["filename"] = .string("")
+        draft["name"] = .string("")
+        draft["engine"] = .string("classic")
+        draft.removeValue(forKey: "image")
+        draft.removeValue(forKey: "image_mtime")
+        return .object(draft)
     }
 }
 
@@ -287,6 +455,7 @@ struct TemplateEditorView: View {
     @EnvironmentObject private var session: AppSession
     @StateObject private var runner = ActionRunner()
     @State private var draft: JSONValue
+    @State private var importingPreview = false
 
     init(template: JSONValue, reload: Reload) {
         self.reload = reload
@@ -295,6 +464,24 @@ struct TemplateEditorView: View {
 
     var body: some View {
         Form {
+            Section("模板封面") {
+                CoverArtworkView(value: draft, contentMode: .fit, placeholderIcon: "photo.artframe")
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 190)
+                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                Button {
+                    importingPreview = true
+                } label: {
+                    Label("选择预览图片", systemImage: "photo.badge.plus")
+                }
+                if !draft["image_data"].isNull {
+                    Button(role: .destructive) {
+                        draft["image_data"] = .null
+                    } label: {
+                        Label("移除新预览图", systemImage: "trash")
+                    }
+                }
+            }
             Section("字段") {
                 JSONObjectEditor(value: $draft)
             }
@@ -307,12 +494,25 @@ struct TemplateEditorView: View {
                 } label: {
                     Label("保存模板", systemImage: "square.and.arrow.down")
                 }
-                JSONInspector(value: draft, title: "当前草稿")
+                .disabled(CoverData.filename(of: draft).isEmpty || runner.isRunning)
             }
+        }
+        .fileImporter(isPresented: $importingPreview, allowedContentTypes: [.image]) { result in
+            guard case .success(let url) = result else { return }
+            importPreview(from: url)
         }
         .navigationTitle(TemplatesView.name(of: draft).isEmpty
                          ? "模板" : TemplatesView.name(of: draft))
         .actionFeedback(runner)
+    }
+
+    private func importPreview(from url: URL) {
+        let scoped = url.startAccessingSecurityScopedResource()
+        defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+        guard let data = try? Data(contentsOf: url), UIImage(data: data) != nil else { return }
+        let ext = url.pathExtension.lowercased()
+        let mime = ext == "png" ? "image/png" : (ext == "gif" ? "image/gif" : "image/jpeg")
+        draft["image_data"] = .string("data:\(mime);base64,\(data.base64EncodedString())")
     }
 }
 
@@ -322,8 +522,8 @@ struct TranslationsView: View {
 
     var body: some View {
         JSONConfigScreen(
-            title: "译名表",
-            note: "键是原始名称，值是显示名称。海报与媒体库标题会按这张表替换。",
+            title: "翻译配置",
+            note: "键是媒体库原名；值可填写文本，也可使用 title / subtitle 设置封面主标题和副标题。",
             unwrapKeys: ["translations", "data", "config"],
             load: {
                 let api = try session.requireAPI()
@@ -331,7 +531,8 @@ struct TranslationsView: View {
             },
             save: { edited in
                 let api = try session.requireAPI()
-                return try await api.resources.saveTranslations(edited)
+                return try await api.resources.saveTranslations(
+                    .object(["translations": edited]))
             })
     }
 }
@@ -345,9 +546,10 @@ struct SuitesView: View {
     @State private var embyKey = ""
     @State private var suiteName = ""
     @State private var deleting: String?
+    @State private var connectionLoaded = false
 
     var body: some View {
-        RemoteList(title: "套装备份") {
+        RemoteList(title: "封面备份") {
             let api = try session.requireAPI()
             return try await api.resources.listSuites()
         } content: { value, reload in
@@ -363,7 +565,7 @@ struct SuitesView: View {
             } header: {
                 Text("目标 Emby")
             } footer: {
-                Text("地址会记在本机，API Key 只保存在当前页面、随请求发给你自己的 CineChill 服务器，不会写入本地存储。")
+                Text("优先读取服务器中已配置的 Emby；也可以在这里临时修改本次操作使用的连接参数。")
             }
 
             Section("新建套装") {
@@ -395,8 +597,10 @@ struct SuitesView: View {
                             Text(name.isEmpty ? "未命名套装" : name)
                                 .font(.subheadline)
                             Spacer()
-                            if let count = suite.first(of: "count", "items", "total").displayString {
-                                Text(count).font(.caption2).foregroundStyle(.tertiary)
+                            let time = suite.first(of: "time", "created_at", "updated_at")
+                            if !time.isNull {
+                                Text(Fmt.dateTime(time))
+                                    .font(.caption2).foregroundStyle(.tertiary)
                             }
                         }
                         if !name.isEmpty {
@@ -416,9 +620,7 @@ struct SuitesView: View {
                     }
                 }
             }
-
-            Section { JSONInspector(value: value) }
-                .confirmationDialog("删除套装？",
+            .confirmationDialog("删除套装？",
                                     isPresented: Binding(get: { deleting != nil },
                                                          set: { if !$0 { deleting = nil } }),
                                     titleVisibility: .visible) {
@@ -436,11 +638,24 @@ struct SuitesView: View {
                 }
         }
         .actionFeedback(runner)
+        .task {
+            guard !connectionLoaded else { return }
+            connectionLoaded = true
+            await loadConnection()
+        }
     }
 
     static func name(of suite: JSONValue) -> String {
         suite.first(of: "suite_name", "name", "id", "title").displayString
             ?? suite.string ?? ""
+    }
+
+    private func loadConnection() async {
+        guard let api = session.api,
+              let connection = await EmbyConnection.load(api: api) else { return }
+        if embyURL.isEmpty { embyURL = connection.url }
+        if embyKey.isEmpty { embyKey = connection.key }
+        if publicHost.isEmpty { publicHost = connection.publicHost ?? "" }
     }
 }
 
@@ -451,28 +666,48 @@ struct SuiteContentView: View {
     @EnvironmentObject private var session: AppSession
 
     var body: some View {
-        RemoteList(title: suiteName) {
+        RemoteList(title: suiteName, cacheKey: "suite-content-\(suiteName)") {
             let api = try session.requireAPI()
-            return try await api.resources.getSuiteContent(
+            let content = try await api.resources.getSuiteContent(
                 SuiteContentRequest(suiteName: suiteName))
+            var covers: JSONValue = .null
+            if let connection = await EmbyConnection.load(api: api) {
+                covers = await Probe.json { try await api.server.getLibraryCovers(connection) }
+            }
+            return .object(["content": content, "covers": covers])
         } content: { value, _ in
-            let items = value.list("items", "libraries", "data", "content")
-            Section("条目（\(items.count)）") {
-                if items.isEmpty { EmptyRow("套装为空") }
+            let content = value["content"]
+            let items = content.list("images", "items", "libraries", "data", "content")
+            let libraries = value["covers"].list("libraries", "items", "data", "views")
+            Section("封面快照（\(items.count)）") {
+                if items.isEmpty { EmptyRow("套装中没有封面图片") }
                 ForEach(Array(items.enumerated()), id: \.offset) { _, item in
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(item.first(of: "name", "title", "library_name").displayString
-                             ?? item.string ?? "—")
-                            .font(.subheadline)
-                        if let id = item.first(of: "id", "item_id", "library_id").displayString {
-                            Text(id).font(.caption2).foregroundStyle(.tertiary)
+                    let id = item.first(of: "id", "item_id", "library_id").displayString ?? ""
+                    HStack(spacing: 12) {
+                        CoverArtworkView(value: item, contentMode: .fill, placeholderIcon: "photo")
+                            .frame(width: 124, height: 74)
+                            .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(libraryName(id: id, item: item, libraries: libraries))
+                                .font(.subheadline.weight(.medium))
+                                .lineLimit(2)
+                            if !id.isEmpty {
+                                Text(id).font(.caption2).foregroundStyle(.tertiary).lineLimit(1)
+                            }
                         }
                     }
                 }
             }
-            Section("字段") { JSONFieldList(value: value, skipKeys: ["items", "content"]) }
-            Section { JSONInspector(value: value) }
         }
+    }
+
+    private func libraryName(id: String, item: JSONValue, libraries: [JSONValue]) -> String {
+        if let name = item.first(of: "name", "title", "library_name").displayString, !name.isEmpty {
+            return name
+        }
+        return libraries.first {
+            $0.first(of: "id", "Id", "library_id").displayString == id
+        }?.first(of: "name", "Name", "title").displayString ?? (id.isEmpty ? "未命名媒体库" : id)
     }
 }
 
@@ -487,6 +722,7 @@ struct SuiteRestoreView: View {
     @State private var embyKey = ""
     @State private var targetIDs = ""
     @State private var confirming = false
+    @State private var connectionLoaded = false
 
     var body: some View {
         Form {
@@ -521,6 +757,11 @@ struct SuiteRestoreView: View {
         }
         .navigationTitle("还原")
         .actionFeedback(runner)
+        .task {
+            guard !connectionLoaded else { return }
+            connectionLoaded = true
+            await loadConnection()
+        }
         .confirmationDialog("覆盖目标媒体库封面？", isPresented: $confirming, titleVisibility: .visible) {
             Button("还原", role: .destructive) {
                 runner.run("已还原") {
@@ -541,6 +782,14 @@ struct SuiteRestoreView: View {
             .map { JSONValue.string(String($0).trimmingCharacters(in: .whitespaces)) }
             .filter { ($0.string ?? "").isEmpty == false }
     }
+
+    private func loadConnection() async {
+        guard let api = session.api,
+              let connection = await EmbyConnection.load(api: api) else { return }
+        if embyURL.isEmpty { embyURL = connection.url }
+        if embyKey.isEmpty { embyKey = connection.key }
+        if publicHost.isEmpty { publicHost = connection.publicHost ?? "" }
+    }
 }
 
 /// 登录页海报来源。
@@ -557,20 +806,9 @@ struct LoginPostersView: View {
                 if posters.isEmpty { EmptyRow("没有可用海报") }
                 ForEach(Array(posters.prefix(60).enumerated()), id: \.offset) { _, poster in
                     HStack(spacing: 12) {
-                        if let url = posterURL(poster) {
-                            AsyncImage(url: url) { phase in
-                                switch phase {
-                                case .success(let image):
-                                    image.resizable().aspectRatio(contentMode: .fill)
-                                case .failure:
-                                    Image(systemName: "photo").foregroundStyle(.tertiary)
-                                default:
-                                    ProgressView()
-                                }
-                            }
+                        CoverArtworkView(value: posterArtwork(poster), contentMode: .fill)
                             .frame(width: 56, height: 84)
                             .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
-                        }
                         VStack(alignment: .leading, spacing: 2) {
                             Text(poster.first(of: "name", "title", "Name").displayString ?? "—")
                                 .font(.subheadline).lineLimit(2)
@@ -581,17 +819,24 @@ struct LoginPostersView: View {
                     }
                 }
             }
-            Section { JSONInspector(value: value) }
         }
     }
 
-    private func posterURL(_ poster: JSONValue) -> URL? {
-        guard let api = try? session.requireAPI() else { return nil }
+    private func posterArtwork(_ poster: JSONValue) -> JSONValue {
+        if CoverData.embeddedImage(in: poster) != nil || CoverData.imageURL(in: poster, session: session) != nil {
+            return poster
+        }
+        guard let api = try? session.requireAPI() else { return poster }
         guard let id = poster.first(of: "item_id", "id", "Id").displayString, !id.isEmpty else {
-            return nil
+            return poster
         }
         let tag = poster.first(of: "tag", "image_tag", "primary_image_tag").displayString
-        return try? api.publicResources.getLoginPosterImageURL(itemId: id, tag: tag, w: 200)
+        guard let url = try? api.publicResources.getLoginPosterImageURL(itemId: id, tag: tag, w: 200) else {
+            return poster
+        }
+        var normalized = poster
+        normalized["image_url"] = .string(url.absoluteString)
+        return normalized
     }
 }
 
@@ -606,6 +851,9 @@ struct PosterApplyView: View {
     @State private var mode = "random"
     @State private var config: JSONValue = .object([:])
     @State private var confirming = false
+    @State private var libraries: [JSONValue] = []
+    @State private var optionsLoaded = false
+    @State private var previewSourceRequest: PreviewRequest?
 
     var body: some View {
         Form {
@@ -618,9 +866,52 @@ struct PosterApplyView: View {
                 TextField("外网地址（可选）", text: $publicHost)
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled()
+                if !libraries.isEmpty {
+                    Picker("媒体库", selection: $libraryID) {
+                        Text("请选择").tag("")
+                        ForEach(Array(libraries.enumerated()), id: \.offset) { _, library in
+                            Text(libraryName(library)).tag(libraryIdentifier(library))
+                        }
+                    }
+                }
                 TextField("媒体库 ID", text: $libraryID)
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled()
+            }
+
+            if !libraries.isEmpty {
+                Section("当前媒体库封面") {
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(alignment: .top, spacing: 12) {
+                            ForEach(Array(libraries.enumerated()), id: \.offset) { _, library in
+                                let id = libraryIdentifier(library)
+                                Button {
+                                    libraryID = id
+                                } label: {
+                                    VStack(alignment: .leading, spacing: 6) {
+                                        CoverArtworkView(value: library, contentMode: .fill,
+                                                         placeholderIcon: "rectangle.stack")
+                                            .frame(width: 136, height: 82)
+                                            .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
+                                            .overlay {
+                                                RoundedRectangle(cornerRadius: 7, style: .continuous)
+                                                    .stroke(libraryID == id ? Color.accentColor : Color.clear,
+                                                            lineWidth: 2)
+                                            }
+                                        Text(libraryName(library))
+                                            .font(.caption.weight(.medium))
+                                            .foregroundStyle(.primary)
+                                            .lineLimit(1)
+                                            .frame(width: 136, alignment: .leading)
+                                    }
+                                }
+                                .buttonStyle(.plain)
+                                .disabled(id.isEmpty)
+                            }
+                        }
+                        .padding(.vertical, 2)
+                    }
+                }
             }
 
             Section {
@@ -652,10 +943,7 @@ struct PosterApplyView: View {
 
             Section {
                 Button {
-                    runner.run(nil) {
-                        let api = try session.requireAPI()
-                        return try await api.resources.preview(request())
-                    }
+                    generatePreview()
                 } label: {
                     Label("生成预览", systemImage: "eye")
                 }
@@ -685,36 +973,40 @@ struct PosterApplyView: View {
                 }
             }
 
-            if runner.lastResult.isNull == false {
-                Section("返回") {
-                    JSONFieldList(value: runner.lastResult,
-                                  skipKeys: ["image", "image_data", "preview", "base64"])
-                    JSONInspector(value: runner.lastResult)
-                }
-            }
         }
-        .navigationTitle("预览与套用")
+        .navigationTitle("封面设计")
         .actionFeedback(runner)
+        .task {
+            guard !optionsLoaded else { return }
+            optionsLoaded = true
+            await loadOptions()
+        }
         .confirmationDialog("覆盖该媒体库封面？", isPresented: $confirming, titleVisibility: .visible) {
             Button("套用", role: .destructive) {
                 runner.run("已套用") {
                     let api = try session.requireAPI()
-                    return try await api.resources.apply(request())
+                    let current = request()
+                    let imageData = previewSourceRequest == current ? previewImageData : nil
+                    return try await api.resources.apply(request(imageData: imageData))
                 }
             }
             Button("取消", role: .cancel) {}
         }
     }
 
-    private func request() -> PreviewRequest {
+    private func request(imageData: String? = nil) -> PreviewRequest {
         PreviewRequest(url: embyURL, key: embyKey,
                        publicHost: publicHost.isEmpty ? nil : publicHost,
-                       libraryId: libraryID, config: config, mode: mode)
+                       libraryId: libraryID, config: config,
+                       imageData: imageData, mode: mode)
+    }
+
+    private var previewImageData: String? {
+        runner.lastResult.deepFirst(of: "image", "image_data", "preview", "base64").string
     }
 
     private var previewImage: UIImage? {
-        guard let raw = runner.lastResult
-            .deepFirst(of: "image", "image_data", "preview", "base64").string else { return nil }
+        guard let raw = previewImageData else { return nil }
         let cleaned = raw.contains(",") ? String(raw.split(separator: ",").last ?? "") : raw
         guard let data = Data(base64Encoded: cleaned, options: .ignoreUnknownCharacters) else {
             return nil
@@ -725,10 +1017,43 @@ struct PosterApplyView: View {
     /// 服务端也可能只回一个缓存 key，图片本体要从 `/api/discover/task_cover` 再取一次。
     /// 这里刻意不认裸 `key` 字段——请求里的 `key` 是 Emby API Key，不能拼进 URL。
     private var previewURL: URL? {
+        if let direct = CoverData.imageURL(in: runner.lastResult, session: session) {
+            return direct
+        }
         guard let key = runner.lastResult
             .deepFirst(of: "cover_key", "preview_key", "cache_key", "task_cover_key").displayString,
               !key.isEmpty else { return nil }
         return try? session.api?.discover.taskCoverPreviewURL(key: key)
+    }
+
+    private func generatePreview() {
+        let payload = request()
+        runner.run(nil, operation: {
+            let api = try session.requireAPI()
+            return try await api.resources.preview(payload)
+        }, onSuccess: {
+            previewSourceRequest = payload
+        })
+    }
+
+    private func loadOptions() async {
+        guard let api = session.api,
+              let connection = await EmbyConnection.load(api: api) else { return }
+        if embyURL.isEmpty { embyURL = connection.url }
+        if embyKey.isEmpty { embyKey = connection.key }
+        if publicHost.isEmpty { publicHost = connection.publicHost ?? "" }
+        let covers = await Probe.json { try await api.server.getLibraryCovers(connection) }
+        libraries = covers.list("libraries", "items", "data", "views")
+        if libraryID.isEmpty { libraryID = libraries.first.map(libraryIdentifier) ?? "" }
+    }
+
+    private func libraryIdentifier(_ library: JSONValue) -> String {
+        library.first(of: "id", "Id", "library_id", "LibraryId").displayString ?? ""
+    }
+
+    private func libraryName(_ library: JSONValue) -> String {
+        library.first(of: "name", "Name", "title", "library_name").displayString
+            ?? libraryIdentifier(library)
     }
 }
 
@@ -744,7 +1069,7 @@ struct PosterConfigPickerView: View {
             let api = try session.requireAPI()
             return try await api.resources.getTemplatesV2()
         } content: { value, _ in
-            let templates = value.list("templates", "items", "data")
+            let templates = CoverData.templates(from: value)
             Section("模板（\(templates.count)）") {
                 if templates.isEmpty { EmptyRow("没有模板") }
                 ForEach(Array(templates.enumerated()), id: \.offset) { _, template in
@@ -752,9 +1077,19 @@ struct PosterConfigPickerView: View {
                         config = Self.parameters(of: template)
                         dismiss()
                     } label: {
-                        HStack {
-                            Text(TemplatesView.name(of: template).isEmpty
-                                 ? "未命名模板" : TemplatesView.name(of: template))
+                        HStack(spacing: 12) {
+                            CoverArtworkView(value: template, contentMode: .fill,
+                                             placeholderIcon: "photo.artframe")
+                                .frame(width: 104, height: 62)
+                                .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text(TemplatesView.name(of: template).isEmpty
+                                     ? "未命名模板" : TemplatesView.name(of: template))
+                                    .foregroundStyle(.primary)
+                                if let engine = template.first(of: "engine", "layout").displayString {
+                                    Text(engine).font(.caption2).foregroundStyle(.secondary)
+                                }
+                            }
                             Spacer()
                             Image(systemName: "chevron.right")
                                 .font(.caption2).foregroundStyle(.tertiary)
@@ -762,14 +1097,18 @@ struct PosterConfigPickerView: View {
                     }
                 }
             }
-            Section { JSONInspector(value: value) }
         }
     }
 
     /// 模板可能把参数包在 config/params 里，也可能直接铺平。
     static func parameters(of template: JSONValue) -> JSONValue {
         for key in ["config", "params", "settings", "options"] where template[key].object != nil {
-            return template[key]
+            var parameters = template[key]
+            if parameters["engine"].isNull,
+               let engine = template.first(of: "engine", "layout").displayString {
+                parameters["engine"] = .string(engine)
+            }
+            return parameters
         }
         return template
     }

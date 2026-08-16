@@ -9,10 +9,11 @@ struct DockerView: View {
     private var trimmedRunID: String { runIDInput.trimmingCharacters(in: .whitespacesAndNewlines) }
 
     var body: some View {
-        RemoteList(title: "Docker") {
+        RemoteList(title: "Docker", refreshOnAppear: true) {
             let api = try session.requireAPI()
-            let status = await Probe.json { try await api.docker.dockerStatus() }
-            let containers = await Probe.json { try await api.docker.listContainers() }
+            async let status = Probe.json { try await api.docker.dockerStatus() }
+            async let containers = Probe.json { try await api.docker.listContainers() }
+            let (status, containers) = await (status, containers)
             return JSONValue.object(["status": status, "containers": containers])
         } content: { value, reload in
             Section("状态") {
@@ -153,7 +154,7 @@ struct DockerLogsView: View {
     @State private var queryKey = 0
 
     var body: some View {
-        RemoteList(title: name) {
+        RemoteList(title: name, cacheKey: "docker-logs-\(containerID)-\(queryKey)", refreshOnAppear: true) {
             let api = try session.requireAPI()
             return try await api.docker.containerLogs(containerId: containerID, tail: tail)
         } content: { value, _ in

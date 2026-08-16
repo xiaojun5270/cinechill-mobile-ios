@@ -1,5 +1,41 @@
+import Foundation
 import SwiftUI
 import Charts
+
+private enum DashboardCache {
+    private static let folderName = "DashboardSnapshots"
+
+    static func load(for serverID: UUID?) -> JSONValue? {
+        guard let url = fileURL(for: serverID),
+              let data = try? Data(contentsOf: url) else { return nil }
+        return try? JSONDecoder().decode(JSONValue.self, from: data)
+    }
+
+    static func save(_ value: JSONValue, for serverID: UUID?) {
+        guard let url = fileURL(for: serverID),
+              let data = try? JSONEncoder().encode(value) else { return }
+        let folder = url.deletingLastPathComponent()
+        try? FileManager.default.createDirectory(at: folder,
+                                                 withIntermediateDirectories: true)
+        try? data.write(to: url, options: .atomic)
+    }
+
+    private static func fileURL(for serverID: UUID?) -> URL? {
+        guard let serverID,
+              let cacheDirectory = FileManager.default.urls(for: .cachesDirectory,
+                                                              in: .userDomainMask).first else { return nil }
+        return cacheDirectory
+            .appendingPathComponent(folderName, isDirectory: true)
+            .appendingPathComponent("\(serverID.uuidString).json")
+    }
+}
+
+private func loadDashboardEmbyOverview(api: CineChillAPI) async -> JSONValue {
+    guard let connection = await EmbyConnection.load(api: api) else { return .null }
+    return await Probe.json {
+        try await api.server.getDashboardEmbyOverview(connection)
+    }
+}
 
 private struct DashboardTrendPoint: Identifiable {
     let id: String
@@ -167,22 +203,25 @@ struct DashboardView: View {
     @State private var trendDays = 7
 
     var body: some View {
-        RemoteScroll(title: "仪表盘") {
+        let serverID = session.activeServerID
+        let cachedValue = DashboardCache.load(for: serverID)
+
+        RemoteScroll(title: "仪表盘", initialValue: cachedValue, refreshOnAppear: true) {
             let api = try session.requireAPI()
-            let stats = await Probe.json { try await api.server.getDashboardStats() }
-            let metrics = await Probe.json { try await api.server.getDashboardDeviceMetrics() }
-            let drive = await Probe.json { try await api.server.getDashboard115Account() }
-            let progress = await Probe.json { try await api.tasks.getProgress() }
-            let health = await Probe.json { try await api.health.getSystemHealth() }
-            let overview: JSONValue
-            if let connection = await EmbyConnection.load(api: api) {
-                overview = await Probe.json {
-                    try await api.server.getDashboardEmbyOverview(connection)
-                }
-            } else {
-                overview = .null
-            }
-            return JSONValue.object([
+            async let statsRequest = Probe.json { try await api.server.getDashboardStats() }
+            async let metricsRequest = Probe.json { try await api.server.getDashboardDeviceMetrics() }
+            async let driveRequest = Probe.json { try await api.server.getDashboard115Account() }
+            async let progressRequest = Probe.json { try await api.tasks.getProgress() }
+            async let healthRequest = Probe.json { try await api.health.getSystemHealth() }
+            async let overviewRequest = loadDashboardEmbyOverview(api: api)
+
+            let (stats, metrics, drive, progress, health, overview) = await (
+                statsRequest, metricsRequest, driveRequest,
+                progressRequest, healthRequest, overviewRequest
+            )
+            guard !Task.isCancelled else { throw APIError.cancelled }
+
+            let value = JSONValue.object([
                 "stats": stats,
                 "metrics": metrics,
                 "drive115": drive,
@@ -190,6 +229,8 @@ struct DashboardView: View {
                 "health": health,
                 "overview": overview,
             ])
+            DashboardCache.save(value, for: serverID)
+            return value
         } content: { value, reload in
             let overview = value["overview"]
             let mediaStats = overview["media_stats"].isNull ? value["stats"] : overview["media_stats"]
@@ -473,35 +514,83 @@ struct DashboardView: View {
     @ViewBuilder
     private func drive115Card(_ drive: JSONValue) -> some View {
         if !drive.isNull, !drive.isEmptyContainer {
-            let name = drive.deepFirst(of: "user_name", "username", "name").displayString
-            let vip = drive.deepFirst(of: "vip_name", "vip", "is_vip").displayString
-            let used = drive.deepFirst(of: "used", "used_size", "space_used")
-            let total = drive.deepFirst(of: "total", "total_size", "all_total", "space_total")
+            let connectionState = drive.deepFirst(of: "connected", "is_connected", "logged_in")
+            let name = drive.deepFirst(of: "account_name", "user_name", "username", "name")
+                .displayString ?? "115 网盘"
+            let uid = drive.deepFirst(of: "uid", "user_id").displayString ?? "--"
+            let loginApp = drive.deepFirst(of: "login_app_label", "login_app", "app_name")
+                .displayString
+            let vipActive = drive.deepFirst(of: "vip_active", "is_vip").bool ?? false
+            let vipForever = drive.deepFirst(of: "vip_forever", "is_forever_vip").bool ?? false
+            let used = drive.deepFirst(of: "used_bytes", "used", "used_size", "space_used")
+            let total = drive.deepFirst(of: "total_bytes", "total", "total_size", "all_total", "space_total")
+            let connected = connectionState.bool ?? (used.double != nil || total.double != nil)
+            let vip = drive.deepFirst(of: "vip_label", "vip_name", "vip")
+                .displayString ?? (connected ? "已连接" : "未连接")
+            let remain = drive.deepFirst(of: "remain_bytes", "remaining", "remain", "space_remain")
+            let usage = drive.deepFirst(of: "usage_percent", "used_percent", "percentage", "ratio")
+            let usedText = drive.deepFirst(of: "used_human", "used_text").displayString ?? Fmt.bytes(used)
+            let totalText = drive.deepFirst(of: "total_human", "total_text").displayString ?? Fmt.bytes(total)
+            let remainText = drive.deepFirst(of: "remain_human", "remaining_human", "remain_text")
+                .displayString ?? Fmt.bytes(remain)
+            let message = drive.deepFirst(of: "message", "detail", "error").displayString
+                ?? "115 账号未连接"
+            let expireAt = drive.deepFirst(of: "vip_expire_at", "vip_expire", "expire_at")
+            let ratio = usage.double != nil
+                ? Fmt.ratio(usage)
+                : ((total.double ?? 0) > 0 ? (used.double ?? 0) / (total.double ?? 1) : 0)
+            let vipTone: BadgeTone = connected
+                ? ((vipActive || vipForever) ? .good : .info)
+                : .bad
+
             DashboardPanel(title: "115 网盘", systemImage: "externaldrive.badge.icloud", tint: .green,
-                           trailing: vip.map { AnyView(StatusBadge($0, tone: .good)) }) {
+                           trailing: AnyView(StatusBadge(vip, tone: vipTone))) {
                 VStack(alignment: .leading, spacing: 14) {
-                    if let name, !name.isEmpty {
-                        HStack(spacing: 11) {
-                            Image(systemName: "person.crop.circle.fill")
-                                .font(.title2)
-                                .foregroundStyle(.green)
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text("当前账号")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                                Text(name)
-                                    .font(.subheadline.weight(.semibold))
-                                    .lineLimit(1)
+                    HStack(spacing: 11) {
+                        Image(systemName: "person.crop.circle.fill")
+                            .font(.title2)
+                            .foregroundStyle(connected ? Color.green : Color.gray)
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(name)
+                                .font(.subheadline.weight(.semibold))
+                                .lineLimit(1)
+                            HStack(spacing: 5) {
+                                Text("UID \(uid)")
+                                if let loginApp, !loginApp.isEmpty {
+                                    Text("·")
+                                    Text(loginApp)
+                                        .lineLimit(1)
+                                }
                             }
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
                         }
                     }
-                    if used.double != nil || total.double != nil {
-                        let ratio = (total.double ?? 0) > 0
-                            ? (used.double ?? 0) / (total.double ?? 1) : 0
+
+                    if connected {
                         DashboardGauge(title: "存储空间",
-                                       caption: "\(Fmt.bytes(used)) / \(Fmt.bytes(total))",
+                                       caption: "\(usedText) / \(totalText)",
                                        systemImage: "externaldrive.fill", tint: .green,
                                        ratio: ratio)
+
+                        HStack(spacing: 12) {
+                            Label("剩余 \(remainText)", systemImage: "internaldrive")
+                            Spacer(minLength: 8)
+                            Text(Fmt.percent(usage.double ?? ratio, digits: 1))
+                                .monospacedDigit()
+                        }
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+
+                        if !vipForever, !expireAt.isNull {
+                            Label("会员到期 \(Fmt.fullDateTime(expireAt))", systemImage: "calendar")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    } else {
+                        Label(message, systemImage: "exclamationmark.circle.fill")
+                            .font(.footnote)
+                            .foregroundStyle(.orange)
                     }
                 }
             }

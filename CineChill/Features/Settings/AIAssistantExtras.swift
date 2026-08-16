@@ -11,8 +11,10 @@ struct AIMemoryView: View {
     var body: some View {
         RemoteList(title: "记忆与人设") {
             let api = try session.requireAPI()
-            let memory = try await api.ai.readAiAssistantMemory()
-            let profile = await Probe.json { try await api.ai.readAiAssistantMemoryProfile() }
+            async let memoryRequest = api.ai.readAiAssistantMemory()
+            async let profileRequest = Probe.json { try await api.ai.readAiAssistantMemoryProfile() }
+            let memory = try await memoryRequest
+            let profile = await profileRequest
             let effectiveProfile = profile.deepFirst(of: "robot_prompt", "user_prompt", "notes_prompt").isNull
                 ? memory["global_profile"] : profile
             return .object([
@@ -88,7 +90,7 @@ struct AIRemindersView: View {
     @State private var queryKey = 0
 
     var body: some View {
-        RemoteList(title: "提醒事项") {
+        RemoteList(title: "提醒事项", cacheKey: "ai-reminders-\(queryKey)") {
             let api = try session.requireAPI()
             return try await api.ai.readAiAssistantReminders(
                 status: status.isEmpty ? nil : status, limit: 100)
@@ -497,7 +499,7 @@ struct AIAuditView: View {
     @State private var queryKey = 0
 
     var body: some View {
-        RemoteList(title: "调用审计") {
+        RemoteList(title: "调用审计", cacheKey: "ai-audit-\(queryKey)") {
             let api = try session.requireAPI()
             return try await api.ai.readAiAssistantAudit(limit: limit)
         } content: { value, _ in

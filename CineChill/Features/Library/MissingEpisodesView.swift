@@ -8,7 +8,8 @@ struct MissingEpisodesView: View {
     @State private var queryKey = 0
 
     var body: some View {
-        RemoteList(title: "缺集统计", subtitle: "统计结果由服务端缓存，需要最新数据时点右上角刷新") {
+        RemoteList(title: "缺集统计", subtitle: "统计结果由服务端缓存，需要最新数据时点右上角刷新",
+                   cacheKey: "missing-episodes-\(queryKey)") {
             let api = try session.requireAPI()
             return try await api.discover.libraryMissingEpisodeStats(
                 refresh: nil, start: 0, summaryOnly: nil, seasonMode: seasonMode)

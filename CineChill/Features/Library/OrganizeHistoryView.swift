@@ -1,4 +1,5 @@
 import SwiftUI
+import Charts
 
 /// 整理记录：筛选、重做、AI 重做、删除、清空。
 struct OrganizeHistoryView: View {
@@ -14,7 +15,7 @@ struct OrganizeHistoryView: View {
     private let dayOptions = [1, 3, 7, 30, 0]
 
     var body: some View {
-        RemoteList(title: "整理记录") {
+        RemoteList(title: "整理记录", cacheKey: "organize-history-\(queryKey)") {
             let api = try session.requireAPI()
             return try await api.organizeHistory.getOrganizeHistory(
                 category: category.isEmpty ? nil : category,
@@ -466,37 +467,234 @@ struct OrganizeMediaSearchView: View {
 }
 
 /// 整理概览：按天统计。
+private struct OrganizeTrendPoint: Identifiable {
+    let id: String
+    let label: String
+    let count: Int
+}
+
 struct OrganizeSummaryView: View {
     @EnvironmentObject private var session: AppSession
     @State private var days = 30
+    @State private var keyword = ""
+    @State private var appliedKeyword = ""
+    @State private var queryKey = 0
 
     var body: some View {
-        RemoteList(title: "整理概览") {
+        RemoteList(title: "整理概览", cacheKey: "organize-summary-\(queryKey)") {
             let api = try session.requireAPI()
-            return try await api.organizeHistory.getOrganizeHistorySummary(days: days, keyword: nil)
+            return try await api.organizeHistory.getOrganizeHistorySummary(
+                days: days,
+                keyword: appliedKeyword.isEmpty ? nil : appliedKeyword)
         } content: { value, _ in
-            Section("范围") {
-                Picker("统计天数", selection: $days) {
-                    ForEach([7, 14, 30, 90], id: \.self) { Text("近 \($0) 天").tag($0) }
-                }
+            rangeSection(value)
+            overviewSection(value)
+            categorySection(value)
+            trendSection(value)
+        }
+        .id(queryKey)
+        .searchable(text: $keyword,
+                    placement: .navigationBarDrawer(displayMode: .automatic),
+                    prompt: "标题或文件关键词")
+        .onSubmit(of: .search) { applyKeyword() }
+        .onChange(of: keyword) { _, newValue in
+            if newValue.isEmpty, !appliedKeyword.isEmpty {
+                appliedKeyword = ""
+                queryKey += 1
             }
-            let buckets = value.list("summary", "daily", "days", "items")
-            if buckets.isEmpty {
-                Section { JSONFieldList(value: value) }
+        }
+    }
+
+    @ViewBuilder
+    private func rangeSection(_ value: JSONValue) -> some View {
+        Section("统计范围") {
+            Picker("统计天数", selection: $days) {
+                ForEach([7, 14, 30, 90], id: \.self) { Text("近 \($0) 天").tag($0) }
+            }
+            .onChange(of: days) { _, _ in queryKey += 1 }
+
+            let start = value.first(of: "start_date", "start", "from").displayString ?? "—"
+            let end = value.first(of: "end_date", "end", "to").displayString ?? "—"
+            KeyValueRow("日期", "\(start) 至 \(end)", monospaced: true)
+            if !appliedKeyword.isEmpty {
+                KeyValueRow("关键词", appliedKeyword)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func overviewSection(_ value: JSONValue) -> some View {
+        let categories = categoryItems(value)
+        let categoryTotal = categories.reduce(0) {
+            $0 + ($1.first(of: "count", "total", "value").int ?? 0)
+        }
+        let total = value.first(of: "total", "count", "records").int ?? categoryTotal
+        let responseDays = value.first(of: "days", "range_days").int ?? days
+
+        Section("概览") {
+            KeyValueRow("整理记录", "\(total) 条")
+            KeyValueRow("统计周期", "近 \(responseDays) 天")
+            if !value["updated_at"].isNull {
+                KeyValueRow("更新时间", Fmt.fullDateTime(value["updated_at"]))
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func categorySection(_ value: JSONValue) -> some View {
+        let categories = categoryItems(value)
+        Section("分类统计") {
+            if categories.isEmpty {
+                EmptyRow("暂无分类统计")
             } else {
-                Section("每日入库") {
-                    ForEach(Array(buckets.enumerated()), id: \.offset) { _, bucket in
-                        HStack {
-                            Text(bucket.first(of: "date", "day", "label").displayString ?? "—")
-                                .font(.subheadline.monospacedDigit())
-                            Spacer()
-                            Text(Fmt.count(bucket.first(of: "count", "total", "value")))
-                                .font(.subheadline.weight(.semibold))
-                        }
+                ForEach(Array(categories.enumerated()), id: \.offset) { _, item in
+                    let key = item.first(of: "key", "category", "type").displayString ?? ""
+                    let label = item.first(of: "label", "name", "title").displayString
+                        ?? categoryLabel(key)
+                    let count = item.first(of: "count", "total", "value").int ?? 0
+                    let color = categoryColor(item, key: key)
+                    HStack(spacing: 12) {
+                        Image(systemName: categoryIcon(key))
+                            .font(.system(size: 15, weight: .semibold))
+                            .foregroundStyle(color)
+                            .frame(width: 30, height: 30)
+                            .background(color.opacity(0.12), in: RoundedRectangle(cornerRadius: 8))
+                        Text(label)
+                        Spacer()
+                        Text("\(count) 条")
+                            .font(.subheadline.weight(.semibold).monospacedDigit())
+                            .foregroundStyle(count > 0 ? color : Color.gray)
                     }
                 }
             }
         }
-        .id(days)
+    }
+
+    @ViewBuilder
+    private func trendSection(_ value: JSONValue) -> some View {
+        let points = trendPoints(value)
+        Section("每日趋势") {
+            if points.isEmpty || points.allSatisfy({ $0.count == 0 }) {
+                EmptyRow("该范围内暂无整理记录")
+            } else {
+                Chart(points) { point in
+                    AreaMark(
+                        x: .value("日期", shortDate(point.label)),
+                        y: .value("数量", point.count)
+                    )
+                    .foregroundStyle(.blue.opacity(0.12))
+                    .interpolationMethod(.monotone)
+
+                    LineMark(
+                        x: .value("日期", shortDate(point.label)),
+                        y: .value("数量", point.count)
+                    )
+                    .foregroundStyle(.blue)
+                    .lineStyle(StrokeStyle(lineWidth: 2.5, lineCap: .round, lineJoin: .round))
+                    .interpolationMethod(.monotone)
+                }
+                .chartYScale(domain: 0...max(points.map(\.count).max() ?? 0, 1))
+                .chartXAxis {
+                    AxisMarks(values: .automatic(desiredCount: min(points.count, 6)))
+                }
+                .chartYAxis {
+                    AxisMarks(position: .leading) { _ in
+                        AxisGridLine()
+                        AxisValueLabel()
+                    }
+                }
+                .frame(height: 210)
+                .padding(.vertical, 6)
+            }
+        }
+    }
+
+    private func applyKeyword() {
+        let normalized = keyword.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard normalized != appliedKeyword else { return }
+        appliedKeyword = normalized
+        queryKey += 1
+    }
+
+    private func categoryItems(_ value: JSONValue) -> [JSONValue] {
+        value.list("categories", "category_stats", "category_counts")
+    }
+
+    private func trendPoints(_ value: JSONValue) -> [OrganizeTrendPoint] {
+        let trend = value.first(of: "trend", "daily", "summary", "items")
+        if let items = trend.array {
+            return items.enumerated().map { index, item in
+                let label = item.first(of: "date", "day", "label", "name").displayString
+                    ?? String(index + 1)
+                return OrganizeTrendPoint(id: "\(label)-\(index)",
+                                          label: label, count: trendCount(item))
+            }
+        }
+        if let items = trend.object {
+            return items.sorted(by: { $0.key < $1.key }).enumerated().map { index, entry in
+                OrganizeTrendPoint(id: "\(entry.key)-\(index)",
+                                   label: entry.key, count: trendCount(entry.value))
+            }
+        }
+        return []
+    }
+
+    private func trendCount(_ item: JSONValue) -> Int {
+        if let count = item.first(of: "total", "count", "value", "records").int {
+            return count
+        }
+        for key in ["categories", "counts", "values"] {
+            if let values = item[key].object {
+                return values.values.compactMap(\.int).reduce(0, +)
+            }
+        }
+        guard let values = item.object else { return item.int ?? 0 }
+        let ignored = Set(["date", "day", "label", "name", "timestamp"])
+        return values.compactMap { key, value in ignored.contains(key) ? nil : value.int }
+            .reduce(0, +)
+    }
+
+    private func shortDate(_ value: String) -> String {
+        let parts = value.split(separator: "-")
+        guard parts.count >= 3 else { return value }
+        return "\(parts[parts.count - 2])-\(parts[parts.count - 1])"
+    }
+
+    private func categoryLabel(_ key: String) -> String {
+        switch key {
+        case "organize_success": return "整理成功"
+        case "organize_failed": return "整理失败"
+        case "wash_success": return "洗版成功"
+        case "wash_failed": return "洗版失败"
+        case "sha1_duplicate": return "SHA1 重复"
+        case "strm_generated": return "STRM 生成"
+        case "skipped": return "跳过记录"
+        case "ai_organize": return "AI 整理"
+        default: return key.isEmpty ? "其他" : key
+        }
+    }
+
+    private func categoryIcon(_ key: String) -> String {
+        switch key {
+        case "organize_success": return "checkmark.circle.fill"
+        case "organize_failed": return "xmark.circle.fill"
+        case "wash_success": return "arrow.triangle.2.circlepath.circle.fill"
+        case "wash_failed": return "exclamationmark.triangle.fill"
+        case "sha1_duplicate": return "doc.on.doc.fill"
+        case "strm_generated": return "doc.badge.gearshape.fill"
+        case "skipped": return "forward.fill"
+        case "ai_organize": return "sparkles"
+        default: return "tray.full.fill"
+        }
+    }
+
+    private func categoryColor(_ item: JSONValue, key: String) -> Color {
+        let tone = item.first(of: "tone", "status", "color").displayString?.lowercased() ?? ""
+        if tone.contains("success") || key.hasSuffix("_success") { return .green }
+        if tone.contains("danger") || tone.contains("error") || key == "organize_failed" { return .red }
+        if tone.contains("warning") || key == "wash_failed" || key == "sha1_duplicate" { return .orange }
+        if tone.contains("muted") || key == "skipped" { return .gray }
+        if key == "ai_organize" { return .purple }
+        return .blue
     }
 }

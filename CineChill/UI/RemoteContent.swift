@@ -1,5 +1,31 @@
 import SwiftUI
 
+@MainActor
+private final class RemoteListSnapshotCache {
+    static let shared = RemoteListSnapshotCache()
+
+    struct Entry {
+        let value: JSONValue
+        let savedAt: Date
+    }
+
+    private var entries: [String: Entry] = [:]
+    private let countLimit = 96
+
+    private init() {}
+
+    func entry(for key: String) -> Entry? {
+        entries[key]
+    }
+
+    func store(_ value: JSONValue, for key: String) {
+        entries[key] = Entry(value: value, savedAt: Date())
+        guard entries.count > countLimit,
+              let oldest = entries.min(by: { $0.value.savedAt < $1.value.savedAt })?.key else { return }
+        entries.removeValue(forKey: oldest)
+    }
+}
+
 /// 让子视图能主动触发所在页面的重新加载。
 public struct Reload {
     let action: () async -> Void
@@ -16,12 +42,18 @@ public struct Reload {
 public struct RemoteList<Content: View>: View {
     private let title: String
     private let subtitle: String?
+    private let cacheKey: String
+    private let refreshOnAppear: Bool
     private let load: () async throws -> JSONValue
     private let content: (JSONValue, Reload) -> Content
 
     @State private var value: JSONValue = .null
     @State private var phase: Phase = .loading
+    @State private var loadingSnapshotKey: String?
+    @State private var loadedSnapshotKey: String?
     @EnvironmentObject private var session: AppSession
+
+    private let cacheLifetime: TimeInterval = 45
 
     private enum Phase: Equatable {
         case loading
@@ -31,10 +63,14 @@ public struct RemoteList<Content: View>: View {
 
     public init(title: String,
                 subtitle: String? = nil,
+                cacheKey: String? = nil,
+                refreshOnAppear: Bool = false,
                 load: @escaping () async throws -> JSONValue,
                 @ViewBuilder content: @escaping (JSONValue, Reload) -> Content) {
         self.title = title
         self.subtitle = subtitle
+        self.cacheKey = cacheKey ?? title
+        self.refreshOnAppear = refreshOnAppear
         self.load = load
         self.content = content
     }
@@ -59,21 +95,61 @@ public struct RemoteList<Content: View>: View {
         .listStyle(.insetGrouped)
         .navigationTitle(title)
         .refreshable { await reload() }
-        .task {
-            if phase == .loading { await reload() }
+        .task(id: snapshotKey) {
+            await loadInitialValue()
         }
     }
 
-    private func reload() async {
+    private var snapshotKey: String {
+        let server = session.activeServer
+        let identity = [
+            server?.id.uuidString ?? "no-server",
+            server?.baseURLString ?? "",
+            server?.username ?? ""
+        ].joined(separator: "|")
+        return "\(identity)|\(cacheKey)"
+    }
+
+    private func loadInitialValue() async {
+        let key = snapshotKey
+        if loadedSnapshotKey != key {
+            loadedSnapshotKey = key
+            value = .null
+            phase = .loading
+        }
+
+        if let cached = RemoteListSnapshotCache.shared.entry(for: key) {
+            value = cached.value
+            phase = .ready
+            if !refreshOnAppear, Date().timeIntervalSince(cached.savedAt) < cacheLifetime { return }
+            await reload(preservingVisibleContent: true)
+        } else {
+            await reload()
+        }
+    }
+
+    private func reload(preservingVisibleContent: Bool = false) async {
+        let key = snapshotKey
+        guard loadingSnapshotKey != key else { return }
+        loadingSnapshotKey = key
+        defer {
+            if loadingSnapshotKey == key { loadingSnapshotKey = nil }
+        }
         do {
             let fetched = try await load()
+            guard key == snapshotKey else { return }
             value = fetched
             phase = .ready
+            RemoteListSnapshotCache.shared.store(fetched, for: key)
         } catch let error as APIError {
-            if error.isAuthFailure { session.handle(error: error) }
             if case .cancelled = error { return }
+            guard key == snapshotKey else { return }
+            if error.isAuthFailure { session.handle(error: error) }
+            if preservingVisibleContent, phase == .ready { return }
             phase = .failed(error.errorDescription ?? "加载失败")
         } catch {
+            guard key == snapshotKey else { return }
+            if preservingVisibleContent, phase == .ready { return }
             phase = .failed(error.localizedDescription)
         }
     }
@@ -82,11 +158,13 @@ public struct RemoteList<Content: View>: View {
 /// 与 `RemoteList` 相同的加载语义，但内容放在可滚动容器里（用于海报墙、仪表盘等）。
 public struct RemoteScroll<Content: View>: View {
     private let title: String
+    private let refreshOnAppear: Bool
     private let load: () async throws -> JSONValue
     private let content: (JSONValue, Reload) -> Content
 
     @State private var value: JSONValue = .null
     @State private var phase: Phase = .loading
+    @State private var isReloading = false
     @EnvironmentObject private var session: AppSession
 
     private enum Phase: Equatable {
@@ -96,11 +174,16 @@ public struct RemoteScroll<Content: View>: View {
     }
 
     public init(title: String,
+                initialValue: JSONValue? = nil,
+                refreshOnAppear: Bool = false,
                 load: @escaping () async throws -> JSONValue,
                 @ViewBuilder content: @escaping (JSONValue, Reload) -> Content) {
         self.title = title
+        self.refreshOnAppear = refreshOnAppear
         self.load = load
         self.content = content
+        _value = State(initialValue: initialValue ?? .null)
+        _phase = State(initialValue: initialValue == nil ? .loading : .ready)
     }
 
     public var body: some View {
@@ -138,11 +221,14 @@ public struct RemoteScroll<Content: View>: View {
         .navigationTitle(title)
         .refreshable { await reload() }
         .task {
-            if phase == .loading { await reload() }
+            if phase == .loading || refreshOnAppear { await reload() }
         }
     }
 
     private func reload() async {
+        guard !isReloading else { return }
+        isReloading = true
+        defer { isReloading = false }
         do {
             value = try await load()
             phase = .ready

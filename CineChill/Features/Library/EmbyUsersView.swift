@@ -88,7 +88,7 @@ struct EmbyUserDetailView: View {
     }
 
     var body: some View {
-        RemoteList(title: titleText) {
+        RemoteList(title: titleText, cacheKey: "emby-user-\(userID)") {
             let api = try session.requireAPI()
             return try await api.embyUsers.getEmbyUser(userId: userID)
         } content: { detail, detailReload in

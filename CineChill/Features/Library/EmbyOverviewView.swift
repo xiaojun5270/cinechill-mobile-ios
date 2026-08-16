@@ -11,8 +11,9 @@ struct EmbyOverviewView: View {
             guard let connection = await EmbyConnection.load(api: api) else {
                 return JSONValue.object(["_missing": .bool(true)])
             }
-            let overview = await Probe.json { try await api.server.getDashboardEmbyOverview(connection) }
-            let covers = await Probe.json { try await api.server.getLibraryCovers(connection) }
+            async let overview = Probe.json { try await api.server.getDashboardEmbyOverview(connection) }
+            async let covers = Probe.json { try await api.server.getLibraryCovers(connection) }
+            let (overview, covers) = await (overview, covers)
             return JSONValue.object(["overview": overview, "covers": covers])
         } content: { value, _ in
             if value["_missing"].bool == true {

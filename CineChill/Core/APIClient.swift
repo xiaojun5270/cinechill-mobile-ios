@@ -6,6 +6,12 @@ import Foundation
 ///   与 Token（登录响应里出现 token 字段时，附加到 `Authorization: Bearer` 等请求头）。
 /// - 所有 JSON 响应统一解码为 `JSONValue`，因为服务端 OpenAPI 未声明任何 200 响应结构。
 public final class APIClient: @unchecked Sendable {
+    private static let responseCache = URLCache(
+        memoryCapacity: 32 * 1024 * 1024,
+        diskCapacity: 192 * 1024 * 1024,
+        diskPath: "cinechill-http"
+    )
+
     public let baseURL: URL
     public let serverID: UUID
     private let session: URLSession
@@ -22,7 +28,8 @@ public final class APIClient: @unchecked Sendable {
         config.httpShouldSetCookies = true
         config.timeoutIntervalForRequest = 30
         config.timeoutIntervalForResource = 300
-        config.requestCachePolicy = .reloadIgnoringLocalCacheData
+        config.urlCache = Self.responseCache
+        config.requestCachePolicy = .useProtocolCachePolicy
         config.waitsForConnectivity = false
         if allowInsecureTLS {
             self.session = URLSession(configuration: config,
@@ -91,6 +98,7 @@ public final class APIClient: @unchecked Sendable {
         var request = URLRequest(url: try url(path: path, query: query))
         request.httpMethod = method.rawValue
         request.timeoutInterval = timeout
+        request.cachePolicy = .reloadIgnoringLocalCacheData
         request.setValue("application/json", forHTTPHeaderField: "Accept")
         request.setValue("CineChill-iOS/1.0", forHTTPHeaderField: "User-Agent")
         request.setValue("XMLHttpRequest", forHTTPHeaderField: "X-Requested-With")
@@ -144,6 +152,7 @@ public final class APIClient: @unchecked Sendable {
     public func data(from url: URL, timeout: TimeInterval = 60) async throws -> Data {
         var request = URLRequest(url: url)
         request.timeoutInterval = timeout
+        request.cachePolicy = .returnCacheDataElseLoad
         if let token = currentToken, !token.isEmpty {
             request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         }

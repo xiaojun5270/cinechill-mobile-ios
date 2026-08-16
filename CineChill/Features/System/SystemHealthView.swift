@@ -9,13 +9,15 @@ struct SystemHealthView: View {
     var body: some View {
         RemoteScroll(title: "系统健康") {
             let api = try session.requireAPI()
-            let metrics = await Probe.json { try await api.server.getDashboardDeviceMetrics() }
-            let health = await Probe.json { try await api.health.getSystemHealth(targetId: nil) }
-            let network = await Probe.json { try await api.health.getLastNetworkConnectivity() }
-            let targets = await Probe.json { try await api.health.getSystemHealthTargets() }
-            let netTargets = await Probe.json {
+            async let metrics = Probe.json { try await api.server.getDashboardDeviceMetrics() }
+            async let health = Probe.json { try await api.health.getSystemHealth(targetId: nil) }
+            async let network = Probe.json { try await api.health.getLastNetworkConnectivity() }
+            async let targets = Probe.json { try await api.health.getSystemHealthTargets() }
+            async let netTargets = Probe.json {
                 try await api.health.getNetworkConnectivityTargets(full: fullTargets ? true : nil)
             }
+            let (metrics, health, network, targets, netTargets) = await
+                (metrics, health, network, targets, netTargets)
             return JSONValue.object(["metrics": metrics, "health": health, "network": network,
                                      "targets": targets, "network_targets": netTargets])
         } content: { value, _ in
@@ -266,7 +268,7 @@ struct NetworkCheckView: View {
     @State private var queryKey = 0
 
     var body: some View {
-        RemoteList(title: "网络连通性") {
+        RemoteList(title: "网络连通性", cacheKey: "network-check-\(queryKey)") {
             let api = try session.requireAPI()
             return try await api.health.getNetworkConnectivity(targetId: nil, full: full)
         } content: { value, _ in
