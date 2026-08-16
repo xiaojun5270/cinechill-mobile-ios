@@ -301,6 +301,12 @@ public struct MediaOrganizeConfig: Codable, Hashable, Sendable {
     public var metadataRepairLookbackDays: Int
     public var metadataRepairWorkers: Int
     public var metadataRepairTvLibraries: [String]?
+    public var metadataRepairAutoEnabled: Bool
+    public var metadataRepairCron: String
+    public var validationYearEnabled: Bool
+    public var validationChineseTitleEnabled: Bool
+    public var validationPosterEnabled: Bool
+    public var validationTvEpisodeEnabled: Bool
     public var lifeMonitorEnabled: Bool
     public var lifeMonitorStartMode: String
     public var autoSyncStrm: Bool
@@ -317,7 +323,7 @@ public struct MediaOrganizeConfig: Codable, Hashable, Sendable {
     public var tvSeasonFolderFormat: String
     public var tvEpisodeFormat: String
 
-    public init(driveIndex: Int = 0, sourceCid: String = "0", sourceName: String = "根目录", targetCid: String = "0", targetName: String = "根目录", failedCid: String = "0", failedName: String = "根目录", dedupCid: String = "0", dedupName: String = "根目录", washCid: String = "0", washName: String = "根目录", scrapeEnabled: Bool = true, embyLocalScrape: Bool = true, scrapeNfo: Bool = true, scrapePoster: Bool = true, scrapeFanart: Bool = true, scrapeLogo: Bool = true, scrapeBanner: Bool = true, scrapeThumb: Bool = true, scrapeSeasonPoster: Bool = true, scrapeEpisodeThumb: Bool = true, policyNfo: String = "missing_only", policyPoster: String = "missing_only", policyFanart: String = "missing_only", policyLogo: String = "missing_only", policyBanner: String = "missing_only", policyThumb: String = "missing_only", policySeasonPoster: String = "missing_only", policyEpisodeThumb: String = "missing_only", metadataRepairEpisodeConditions: [String]? = nil, metadataRepairImageConditions: [String]? = nil, metadataRepairLookbackDays: Int = 60, metadataRepairWorkers: Int = 8, metadataRepairTvLibraries: [String]? = nil, lifeMonitorEnabled: Bool = true, lifeMonitorStartMode: String = "last", autoSyncStrm: Bool = true, embyScrapersEnabled: Bool = false, washEnabled: Bool = true, washByEquivalentSize: Bool = true, washToleranceRatio: Double = 0.0, washReserved1: Bool = false, washReserved2: Bool = false, organizeParseMode: String = "ffprobe", movieFolderFormat: String = "{title} ({year}) {tmdb-{tmdb_id}}", movieRenameFormat: String = "{en_title}.{year}.{resource_pix}.{web_source}.{resource_type}.{resource_effect}.{video_encode}.{color_depth}.{video_effect}.{fps}.{audio_encode}-{resource_team}", tvFolderFormat: String = "{title} ({year}) {tmdb-{tmdb_id}}", tvSeasonFolderFormat: String = "Season {season_num}", tvEpisodeFormat: String = "{en_title}.{season_episode}.{year}.{resource_pix}.{web_source}.{resource_type}.{video_encode}.{color_depth}.{video_effect}.{fps}.{audio_encode}-{resource_team}") {
+    public init(driveIndex: Int = 0, sourceCid: String = "0", sourceName: String = "根目录", targetCid: String = "0", targetName: String = "根目录", failedCid: String = "0", failedName: String = "根目录", dedupCid: String = "0", dedupName: String = "根目录", washCid: String = "0", washName: String = "根目录", scrapeEnabled: Bool = true, embyLocalScrape: Bool = true, scrapeNfo: Bool = true, scrapePoster: Bool = true, scrapeFanart: Bool = true, scrapeLogo: Bool = true, scrapeBanner: Bool = true, scrapeThumb: Bool = true, scrapeSeasonPoster: Bool = true, scrapeEpisodeThumb: Bool = true, policyNfo: String = "missing_only", policyPoster: String = "missing_only", policyFanart: String = "missing_only", policyLogo: String = "missing_only", policyBanner: String = "missing_only", policyThumb: String = "missing_only", policySeasonPoster: String = "missing_only", policyEpisodeThumb: String = "missing_only", metadataRepairEpisodeConditions: [String]? = nil, metadataRepairImageConditions: [String]? = nil, metadataRepairLookbackDays: Int = 60, metadataRepairWorkers: Int = 8, metadataRepairTvLibraries: [String]? = nil, metadataRepairAutoEnabled: Bool = true, metadataRepairCron: String = "0 2 * * *", validationYearEnabled: Bool = true, validationChineseTitleEnabled: Bool = true, validationPosterEnabled: Bool = true, validationTvEpisodeEnabled: Bool = true, lifeMonitorEnabled: Bool = true, lifeMonitorStartMode: String = "last", autoSyncStrm: Bool = true, embyScrapersEnabled: Bool = false, washEnabled: Bool = false, washByEquivalentSize: Bool = false, washToleranceRatio: Double = 0.0, washReserved1: Bool = false, washReserved2: Bool = false, organizeParseMode: String = "ffprobe", movieFolderFormat: String = "{title} ({year}) {tmdb-{tmdb_id}}", movieRenameFormat: String = "{en_title}.{year}.{resource_pix}.{web_source}.{resource_type}.{resource_effect}.{video_encode}.{color_depth}.{video_effect}.{fps}.{audio_encode}-{resource_team}", tvFolderFormat: String = "{title} ({year}) {tmdb-{tmdb_id}}", tvSeasonFolderFormat: String = "Season {season_num}", tvEpisodeFormat: String = "{en_title}.{season_episode}.{year}.{resource_pix}.{web_source}.{resource_type}.{video_encode}.{color_depth}.{video_effect}.{fps}.{audio_encode}-{resource_team}") {
         self.driveIndex = driveIndex
         self.sourceCid = sourceCid
         self.sourceName = sourceName
@@ -352,6 +358,12 @@ public struct MediaOrganizeConfig: Codable, Hashable, Sendable {
         self.metadataRepairLookbackDays = metadataRepairLookbackDays
         self.metadataRepairWorkers = metadataRepairWorkers
         self.metadataRepairTvLibraries = metadataRepairTvLibraries
+        self.metadataRepairAutoEnabled = metadataRepairAutoEnabled
+        self.metadataRepairCron = metadataRepairCron
+        self.validationYearEnabled = validationYearEnabled
+        self.validationChineseTitleEnabled = validationChineseTitleEnabled
+        self.validationPosterEnabled = validationPosterEnabled
+        self.validationTvEpisodeEnabled = validationTvEpisodeEnabled
         self.lifeMonitorEnabled = lifeMonitorEnabled
         self.lifeMonitorStartMode = lifeMonitorStartMode
         self.autoSyncStrm = autoSyncStrm
@@ -404,6 +416,12 @@ public struct MediaOrganizeConfig: Codable, Hashable, Sendable {
         case metadataRepairLookbackDays = "metadata_repair_lookback_days"
         case metadataRepairWorkers = "metadata_repair_workers"
         case metadataRepairTvLibraries = "metadata_repair_tv_libraries"
+        case metadataRepairAutoEnabled = "metadata_repair_auto_enabled"
+        case metadataRepairCron = "metadata_repair_cron"
+        case validationYearEnabled = "validation_year_enabled"
+        case validationChineseTitleEnabled = "validation_chinese_title_enabled"
+        case validationPosterEnabled = "validation_poster_enabled"
+        case validationTvEpisodeEnabled = "validation_tv_episode_enabled"
         case lifeMonitorEnabled = "life_monitor_enabled"
         case lifeMonitorStartMode = "life_monitor_start_mode"
         case autoSyncStrm = "auto_sync_strm"
@@ -457,12 +475,18 @@ public struct MediaOrganizeConfig: Codable, Hashable, Sendable {
         self.metadataRepairLookbackDays = try c.decodeIfPresent(Int.self, forKey: .metadataRepairLookbackDays) ?? 60
         self.metadataRepairWorkers = try c.decodeIfPresent(Int.self, forKey: .metadataRepairWorkers) ?? 8
         self.metadataRepairTvLibraries = try c.decodeIfPresent([String].self, forKey: .metadataRepairTvLibraries)
+        self.metadataRepairAutoEnabled = try c.decodeIfPresent(Bool.self, forKey: .metadataRepairAutoEnabled) ?? true
+        self.metadataRepairCron = try c.decodeIfPresent(String.self, forKey: .metadataRepairCron) ?? "0 2 * * *"
+        self.validationYearEnabled = try c.decodeIfPresent(Bool.self, forKey: .validationYearEnabled) ?? true
+        self.validationChineseTitleEnabled = try c.decodeIfPresent(Bool.self, forKey: .validationChineseTitleEnabled) ?? true
+        self.validationPosterEnabled = try c.decodeIfPresent(Bool.self, forKey: .validationPosterEnabled) ?? true
+        self.validationTvEpisodeEnabled = try c.decodeIfPresent(Bool.self, forKey: .validationTvEpisodeEnabled) ?? true
         self.lifeMonitorEnabled = try c.decodeIfPresent(Bool.self, forKey: .lifeMonitorEnabled) ?? true
         self.lifeMonitorStartMode = try c.decodeIfPresent(String.self, forKey: .lifeMonitorStartMode) ?? "last"
         self.autoSyncStrm = try c.decodeIfPresent(Bool.self, forKey: .autoSyncStrm) ?? true
         self.embyScrapersEnabled = try c.decodeIfPresent(Bool.self, forKey: .embyScrapersEnabled) ?? false
-        self.washEnabled = try c.decodeIfPresent(Bool.self, forKey: .washEnabled) ?? true
-        self.washByEquivalentSize = try c.decodeIfPresent(Bool.self, forKey: .washByEquivalentSize) ?? true
+        self.washEnabled = try c.decodeIfPresent(Bool.self, forKey: .washEnabled) ?? false
+        self.washByEquivalentSize = try c.decodeIfPresent(Bool.self, forKey: .washByEquivalentSize) ?? false
         self.washToleranceRatio = try c.decodeIfPresent(Double.self, forKey: .washToleranceRatio) ?? 0.0
         self.washReserved1 = try c.decodeIfPresent(Bool.self, forKey: .washReserved1) ?? false
         self.washReserved2 = try c.decodeIfPresent(Bool.self, forKey: .washReserved2) ?? false
