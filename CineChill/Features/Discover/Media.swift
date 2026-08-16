@@ -12,6 +12,7 @@ func mediaItemList(_ value: JSONValue) -> [JSONValue] {
 }
 
 /// 海报地址推断：TMDB 用图片代理，豆瓣走豆瓣代理，其余外链走通用缓存代理。
+@MainActor
 enum Artwork {
     static func url(for item: JSONValue, api: CineChillAPI?, session: AppSession) -> URL? {
         if let api, let path = item.first(of: "poster_path", "posterPath").string, path.hasPrefix("/") {

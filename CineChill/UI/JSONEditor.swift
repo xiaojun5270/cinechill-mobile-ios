@@ -10,30 +10,44 @@ public extension Binding where Value == JSONValue {
     }
 
     var asString: Binding<String> {
-        Binding(get: { wrappedValue.displayString ?? "" },
-                set: { wrappedValue = $0.isEmpty ? .string("") : .string($0) })
+        Binding<String>(
+            get: { self.wrappedValue.displayString ?? "" },
+            set: { newValue in
+                self.wrappedValue = newValue.isEmpty ? .string("") : .string(newValue)
+            }
+        )
     }
 
     var asBool: Binding<Bool> {
-        Binding(get: { wrappedValue.bool ?? false }, set: { wrappedValue = .bool($0) })
+        Binding<Bool>(
+            get: { self.wrappedValue.bool ?? false },
+            set: { newValue in self.wrappedValue = .bool(newValue) }
+        )
     }
 
     var asIntText: Binding<String> {
-        Binding(get: { wrappedValue.int.map(String.init) ?? "" },
-                set: { wrappedValue = Int($0).map { JSONValue.int($0) } ?? .int(0) })
+        Binding<String>(
+            get: { self.wrappedValue.int.map(String.init) ?? "" },
+            set: { newValue in
+                self.wrappedValue = Int(newValue).map(JSONValue.int) ?? .int(0)
+            }
+        )
     }
 
     var asDoubleText: Binding<String> {
-        Binding(get: {
-            guard let d = wrappedValue.double else { return "" }
-            return d == d.rounded() ? String(Int(d)) : String(d)
-        }, set: {
-            if let d = Double($0), d.isFinite {
-                wrappedValue = .double(d)
-            } else {
-                wrappedValue = .double(0)
+        Binding<String>(
+            get: {
+                guard let d = self.wrappedValue.double else { return "" }
+                return d == d.rounded() ? String(Int(d)) : String(d)
+            },
+            set: { newValue in
+                if let d = Double(newValue), d.isFinite {
+                    self.wrappedValue = .double(d)
+                } else {
+                    self.wrappedValue = .double(0)
+                }
             }
-        })
+        )
     }
 }
 

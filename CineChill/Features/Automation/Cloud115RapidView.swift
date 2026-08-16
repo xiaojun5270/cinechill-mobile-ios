@@ -61,7 +61,7 @@ struct Cloud115RapidView: View {
     }
     @ViewBuilder
     private var credentialSection: some View {
-        Section("账号 Cookie") {
+        Section {
             SecureField("源账号 115 Cookie", text: $sourceCookie)
                 .textInputAutocapitalization(.never)
                 .autocorrectionDisabled()
@@ -71,6 +71,8 @@ struct Cloud115RapidView: View {
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled()
             }
+        } header: {
+            Text("账号 Cookie")
         } footer: {
             Text("Cookie 仅提交给你自己的 CineChill 服务器，本机不做保存；提交成功后输入框会自动清空。")
         }
@@ -78,7 +80,7 @@ struct Cloud115RapidView: View {
 
     @ViewBuilder
     private var sourceSection: some View {
-        Section("源文件（\(items.count)）") {
+        Section {
             if items.isEmpty {
                 Text("尚未选择文件").font(.footnote).foregroundStyle(.secondary)
             }
@@ -100,6 +102,8 @@ struct Cloud115RapidView: View {
                 Label("浏览源账号目录", systemImage: "folder.badge.plus")
             }
             .disabled(sourceCookie.isEmpty)
+        } header: {
+            Text("源文件（\(items.count)）")
         } footer: {
             Text("左滑可移除条目。每个条目按服务端返回的原始字段整体回传，秒传所需的 sha1 / pick_code 会一并提交。")
         }

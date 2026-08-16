@@ -64,7 +64,7 @@ struct DockerView: View {
     @ViewBuilder
     private var updateTaskSection: some View {
         let detected = runner.lastResult.deepFirst(of: "run_id", "update_run_id", "task_id").displayString ?? ""
-        Section("镜像更新任务") {
+        Section {
             if !detected.isEmpty {
                 KeyValueRow("最近 run_id", detected, monospaced: true)
                 NavigationLink {
@@ -82,6 +82,8 @@ struct DockerView: View {
                 Label("查看该任务状态", systemImage: "doc.text.magnifyingglass")
             }
             .disabled(trimmedRunID.isEmpty)
+        } header: {
+            Text("镜像更新任务")
         } footer: {
             Text("点击容器的「更新镜像」后，服务端会返回一个 run_id，这里可以查看该次更新的执行状态与日志。")
         }

@@ -124,6 +124,43 @@ struct SystemHealthView: View {
             }
         }
     }
+
+    @ViewBuilder
+    private func connectivityTargetsCard(_ targets: JSONValue) -> some View {
+        let list = targets.list("targets", "items", "data")
+        CardSection(title: "连通性目标", systemImage: "antenna.radiowaves.left.and.right") {
+            VStack(alignment: .leading, spacing: 8) {
+                if list.isEmpty {
+                    Text("服务端没有返回连通性目标")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                } else {
+                    ForEach(Array(list.enumerated()), id: \.offset) { _, target in
+                        HStack(spacing: 10) {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(target.first(of: "name", "label", "host", "url").displayString ?? "—")
+                                    .font(.subheadline)
+                                if let address = target.first(of: "url", "host", "address").displayString {
+                                    Text(address)
+                                        .font(.caption2)
+                                        .foregroundStyle(.tertiary)
+                                        .lineLimit(1)
+                                }
+                            }
+                            Spacer()
+                            if let enabled = target.first(of: "enabled", "active").bool {
+                                StatusBadge(enabled ? "启用" : "停用", tone: enabled ? .good : .neutral)
+                            }
+                        }
+                    }
+                }
+
+                Toggle("显示全部检测目标", isOn: $fullTargets)
+                    .font(.subheadline)
+                    .onChange(of: fullTargets) { _, _ in queryKey += 1 }
+            }
+        }
+    }
 }
 
 /// 主动发起一次网络连通性检测（full=true 会检测全部目标，耗时较长）。

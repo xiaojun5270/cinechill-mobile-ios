@@ -482,7 +482,7 @@ struct TmdbArtworkBatchView: View {
 
     var body: some View {
         Form {
-            Section("参数") {
+            Section {
                 TextField("TMDb ID（逗号分隔）", text: $idsText)
                     .keyboardType(.numbersAndPunctuation)
                     .autocorrectionDisabled()
@@ -493,6 +493,8 @@ struct TmdbArtworkBatchView: View {
                 .pickerStyle(.segmented)
                 Button("批量获取") { submit() }
                     .disabled(runner.isRunning || parsedIDs.isEmpty)
+            } header: {
+                Text("参数")
             } footer: {
                 Text("识别到 \(parsedIDs.count) 个 ID。请求体字段名以服务端为准，可在下方核对。")
             }
@@ -588,12 +590,14 @@ struct EmbyItemsDeleteView: View {
 
     var body: some View {
         Form {
-            Section("条目 ID") {
+            Section {
                 TextEditor(text: $idsText)
                     .frame(minHeight: 96)
                     .font(.system(.body, design: .monospaced))
                     .autocorrectionDisabled()
                     .textInputAutocapitalization(.never)
+            } header: {
+                Text("条目 ID")
             } footer: {
                 Text("逗号或换行分隔，识别到 \(parsedIDs.count) 个 ID。删除后无法在 App 内撤销。")
             }
