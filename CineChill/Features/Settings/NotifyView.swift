@@ -223,10 +223,10 @@ struct NotifyView: View {
     var body: some View {
         RemoteList(title: "通知渠道") {
             let api = try session.requireAPI()
-            async let channels = Probe.json { try await api.notify.getNotificationChannels() }
-            async let types = Probe.json { try await api.notify.getNotificationTypes() }
-            async let telegram = Probe.json { try await api.notify.getTelegramStatus() }
-            let (channels, types, telegram) = await (channels, types, telegram)
+            async let channelsRequest = Probe.json { try await api.notify.getNotificationChannels() }
+            async let typesRequest = Probe.json { try await api.notify.getNotificationTypes() }
+            async let telegramRequest = Probe.json { try await api.notify.getTelegramStatus() }
+            let (channels, types, telegram) = await (channelsRequest, typesRequest, telegramRequest)
             return JSONValue.object(["channels": channels, "types": types, "telegram": telegram])
         } content: { value, _ in
             Section("渠道") {
@@ -352,11 +352,13 @@ struct TelegramNotifyView: View {
     var body: some View {
         RemoteList(title: "Telegram") {
             let api = try session.requireAPI()
-            async let config = Probe.json { try await api.notify.getTelegramNotifyConfig() }
-            async let status = Probe.json { try await api.notify.getTelegramStatus() }
-            async let types = Probe.json { try await api.notify.getNotificationTypes() }
-            async let defaults = Probe.json { try await api.notify.getNotificationDefaultTemplates() }
-            let (config, status, types, defaults) = await (config, status, types, defaults)
+            async let configRequest = Probe.json { try await api.notify.getTelegramNotifyConfig() }
+            async let statusRequest = Probe.json { try await api.notify.getTelegramStatus() }
+            async let typesRequest = Probe.json { try await api.notify.getNotificationTypes() }
+            async let defaultsRequest = Probe.json { try await api.notify.getNotificationDefaultTemplates() }
+            let (config, status, types, defaults) = await (
+                configRequest, statusRequest, typesRequest, defaultsRequest
+            )
             return JSONValue.object([
                 "config": config, "status": status, "types": types, "defaults": defaults
             ])

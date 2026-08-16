@@ -88,10 +88,10 @@ struct DiscoverBrowseView: View {
     var body: some View {
         RemoteScroll(title: "浏览发现") {
             let api = try session.requireAPI()
-            async let sources = Probe.json { try await api.discover.getDiscoverSources() }
-            async let genres = Probe.json { try await api.discover.getGenres() }
-            async let results = loadResults(api: api)
-            let (sources, genres, results) = await (sources, genres, results)
+            async let sourcesRequest = Probe.json { try await api.discover.getDiscoverSources() }
+            async let genresRequest = Probe.json { try await api.discover.getGenres() }
+            async let resultsRequest = loadResults(api: api)
+            let (sources, genres, results) = await (sourcesRequest, genresRequest, resultsRequest)
             return JSONValue.object(["sources": sources, "genres": genres, "results": results])
         } content: { value, _ in
             sourceCard(value["sources"])

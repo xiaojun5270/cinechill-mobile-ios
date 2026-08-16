@@ -9,10 +9,10 @@ struct TaskCenterView: View {
     var body: some View {
         RemoteList(title: "自动封面", refreshOnAppear: true) {
             let api = try session.requireAPI()
-            async let progress = Probe.json { try await api.tasks.getProgress() }
-            async let saved = Probe.json { try await api.tasks.getTasks() }
-            async let templates = Probe.json { try await api.resources.getTemplatesV2() }
-            let (progress, saved, templates) = await (progress, saved, templates)
+            async let progressRequest = Probe.json { try await api.tasks.getProgress() }
+            async let savedRequest = Probe.json { try await api.tasks.getTasks() }
+            async let templatesRequest = Probe.json { try await api.resources.getTemplatesV2() }
+            let (progress, saved, templates) = await (progressRequest, savedRequest, templatesRequest)
             return JSONValue.object(["progress": progress, "saved": saved, "templates": templates])
         } content: { value, reload in
             progressSection(value["progress"], reload: reload)

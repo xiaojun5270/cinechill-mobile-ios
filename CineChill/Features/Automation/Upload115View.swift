@@ -10,9 +10,9 @@ struct Upload115View: View {
     var body: some View {
         RemoteList(title: "115秒传", refreshOnAppear: true) {
             let api = try session.requireAPI()
-            async let tasks = Probe.json { try await api.upload115.getTasks() }
-            async let status = Probe.json { try await api.upload115.getStatus() }
-            let (tasks, status) = await (tasks, status)
+            async let tasksRequest = Probe.json { try await api.upload115.getTasks() }
+            async let statusRequest = Probe.json { try await api.upload115.getStatus() }
+            let (tasks, status) = await (tasksRequest, statusRequest)
             return JSONValue.object(["tasks": tasks, "status": status])
         } content: { value, reload in
             let status = value["status"]

@@ -13,9 +13,9 @@ struct WebhookView: View {
     var body: some View {
         RemoteList(title: "Webhook", refreshOnAppear: true) {
             let api = try session.requireAPI()
-            async let config = Probe.json { try await api.webhook.getWebhookConfig() }
-            async let queue = Probe.json { try await api.webhook.getWebhookQueue() }
-            let (config, queue) = await (config, queue)
+            async let configRequest = Probe.json { try await api.webhook.getWebhookConfig() }
+            async let queueRequest = Probe.json { try await api.webhook.getWebhookQueue() }
+            let (config, queue) = await (configRequest, queueRequest)
             return JSONValue.object(["config": config, "queue": queue])
         } content: { value, reload in
             Section("配置") {

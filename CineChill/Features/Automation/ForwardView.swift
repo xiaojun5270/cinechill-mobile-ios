@@ -16,9 +16,9 @@ struct ForwardView: View {
     var body: some View {
         RemoteList(title: "资源转发") {
             let api = try session.requireAPI()
-            async let config = Probe.json { try await api.forward.getConfig() }
-            async let sources = Probe.json { try await api.forward.getSearchSources() }
-            let (config, sources) = await (config, sources)
+            async let configRequest = Probe.json { try await api.forward.getConfig() }
+            async let sourcesRequest = Probe.json { try await api.forward.getSearchSources() }
+            let (config, sources) = await (configRequest, sourcesRequest)
             return JSONValue.object(["config": config, "sources": sources])
         } content: { value, reload in
             let widgetToken = value["config"].deepFirst(of: "widget_token", "token").displayString ?? ""

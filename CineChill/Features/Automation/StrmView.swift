@@ -8,9 +8,9 @@ struct StrmView: View {
     var body: some View {
         RemoteList(title: "STRM 同步", refreshOnAppear: true) {
             let api = try session.requireAPI()
-            async let config = Probe.json { try await api.strm.getStrmConfig() }
-            async let progress = Probe.json { try await api.strm.getStrmProgress() }
-            let (config, progress) = await (config, progress)
+            async let configRequest = Probe.json { try await api.strm.getStrmConfig() }
+            async let progressRequest = Probe.json { try await api.strm.getStrmProgress() }
+            let (config, progress) = await (configRequest, progressRequest)
             return JSONValue.object(["config": config, "progress": progress])
         } content: { value, reload in
             progressSection(value["progress"], reload: reload)

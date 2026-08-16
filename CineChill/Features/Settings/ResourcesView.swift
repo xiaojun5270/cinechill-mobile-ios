@@ -9,10 +9,10 @@ struct ResourcesView: View {
     var body: some View {
         RemoteList(title: "封面系统") {
             let api = try session.requireAPI()
-            async let templates = Probe.json { try await api.resources.getTemplatesV2() }
-            async let suites = Probe.json { try await api.resources.listSuites() }
-            async let tasks = Probe.json { try await api.tasks.getTasks() }
-            let (templates, suites, tasks) = await (templates, suites, tasks)
+            async let templatesRequest = Probe.json { try await api.resources.getTemplatesV2() }
+            async let suitesRequest = Probe.json { try await api.resources.listSuites() }
+            async let tasksRequest = Probe.json { try await api.tasks.getTasks() }
+            let (templates, suites, tasks) = await (templatesRequest, suitesRequest, tasksRequest)
             return JSONValue.object(["templates": templates, "suites": suites, "tasks": tasks])
         } content: { value, _ in
             let templates = CoverData.templates(from: value["templates"])
@@ -65,10 +65,10 @@ struct CoverResourceConfigView: View {
     var body: some View {
         RemoteList(title: "资源配置") {
             let api = try session.requireAPI()
-            async let fonts = Probe.json { try await api.resources.getFonts() }
-            async let layouts = Probe.json { try await api.resources.getLayouts() }
-            async let templates = Probe.json { try await api.resources.getTemplatesV2() }
-            let (fonts, layouts, templates) = await (fonts, layouts, templates)
+            async let fontsRequest = Probe.json { try await api.resources.getFonts() }
+            async let layoutsRequest = Probe.json { try await api.resources.getLayouts() }
+            async let templatesRequest = Probe.json { try await api.resources.getTemplatesV2() }
+            let (fonts, layouts, templates) = await (fontsRequest, layoutsRequest, templatesRequest)
             return .object(["fonts": fonts, "layouts": layouts, "templates": templates])
         } content: { value, _ in
             let fonts = value["fonts"].list("fonts", "items", "data")

@@ -11,9 +11,9 @@ struct DockerView: View {
     var body: some View {
         RemoteList(title: "Docker", refreshOnAppear: true) {
             let api = try session.requireAPI()
-            async let status = Probe.json { try await api.docker.dockerStatus() }
-            async let containers = Probe.json { try await api.docker.listContainers() }
-            let (status, containers) = await (status, containers)
+            async let statusRequest = Probe.json { try await api.docker.dockerStatus() }
+            async let containersRequest = Probe.json { try await api.docker.listContainers() }
+            let (status, containers) = await (statusRequest, containersRequest)
             return JSONValue.object(["status": status, "containers": containers])
         } content: { value, reload in
             Section("状态") {

@@ -9,15 +9,16 @@ struct SystemHealthView: View {
     var body: some View {
         RemoteScroll(title: "系统健康") {
             let api = try session.requireAPI()
-            async let metrics = Probe.json { try await api.server.getDashboardDeviceMetrics() }
-            async let health = Probe.json { try await api.health.getSystemHealth(targetId: nil) }
-            async let network = Probe.json { try await api.health.getLastNetworkConnectivity() }
-            async let targets = Probe.json { try await api.health.getSystemHealthTargets() }
-            async let netTargets = Probe.json {
+            async let metricsRequest = Probe.json { try await api.server.getDashboardDeviceMetrics() }
+            async let healthRequest = Probe.json { try await api.health.getSystemHealth(targetId: nil) }
+            async let networkRequest = Probe.json { try await api.health.getLastNetworkConnectivity() }
+            async let targetsRequest = Probe.json { try await api.health.getSystemHealthTargets() }
+            async let netTargetsRequest = Probe.json {
                 try await api.health.getNetworkConnectivityTargets(full: fullTargets ? true : nil)
             }
-            let (metrics, health, network, targets, netTargets) = await
-                (metrics, health, network, targets, netTargets)
+            let (metrics, health, network, targets, netTargets) = await (
+                metricsRequest, healthRequest, networkRequest, targetsRequest, netTargetsRequest
+            )
             return JSONValue.object(["metrics": metrics, "health": health, "network": network,
                                      "targets": targets, "network_targets": netTargets])
         } content: { value, _ in
