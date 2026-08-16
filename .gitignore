@@ -1,0 +1,20 @@
+# macOS / Xcode
+.DS_Store
+build/
+DerivedData/
+*.xcuserstate
+*.xcuserdatad/
+xcuserdata/
+*.xcarchive
+*.ipa
+payload/
+build.log
+*.moved-aside
+*.hmap
+*.ipa.zip
+
+# 本地参考资料：Admin 快照里带服务器地址与 3.2MB 缓存图片，不进公开仓库
+CineChill Admin.html
+CineChill Admin_files/
+CineChill_openapi.json
+CineChill_移动端_API接口文档.md
