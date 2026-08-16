@@ -103,9 +103,6 @@ struct EmbyTaskDetailView: View {
                     Label("触发器设置", systemImage: "alarm")
                 }
             }
-            Section("原始数据") {
-                JSONFieldList(value: task)
-            }
         }
         .navigationTitle(task.first(of: "Name", "name").displayString ?? "任务")
     }

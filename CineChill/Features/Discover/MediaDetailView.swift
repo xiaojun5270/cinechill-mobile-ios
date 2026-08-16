@@ -27,14 +27,6 @@ struct MediaDetailView: View {
             infoCard(detail, status: value["status"])
             actionCard
             seasonsCard(detail)
-            CardSection(title: "原始数据", systemImage: "curlybraces") {
-                NavigationLink {
-                    JSONRawScreen(value: value, title: summary.title)
-                } label: {
-                    Label("查看接口返回", systemImage: "chevron.right.circle")
-                        .font(.subheadline)
-                }
-            }
         }
         .actionFeedback(runner)
     }

@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// Emby 搜索：直接检索媒体服务器条目，结果可查看图片与原始字段。
+/// Emby 搜索：直接检索媒体服务器条目并展示媒体详情。
 struct EmbySearchView: View {
     @EnvironmentObject private var session: AppSession
     @StateObject private var runner = ActionRunner()
@@ -39,7 +39,7 @@ struct EmbySearchView: View {
             Section("结果（\(results.count)）") {
                 ForEach(Array(results.enumerated()), id: \.offset) { index, item in
                     NavigationLink {
-                        JSONRawScreen(value: item, title: title(item) ?? "条目 \(index + 1)")
+                        EmbySearchResultDetailView(item: item, fallbackTitle: "条目 \(index + 1)")
                     } label: {
                         row(item, index: index)
                     }
@@ -100,5 +100,42 @@ struct EmbySearchView: View {
             results = runner.lastResult.list("items", "results", "data", "Items")
             searched = true
         })
+    }
+}
+
+private struct EmbySearchResultDetailView: View {
+    let item: JSONValue
+    let fallbackTitle: String
+
+    private var title: String {
+        item.first(of: "name", "Name", "title", "Title", "original_title").displayString
+            ?? fallbackTitle
+    }
+
+    var body: some View {
+        Form {
+            Section("媒体") {
+                KeyValueRow("名称", title)
+                KeyValueRow("类型", item.first(of: "type", "Type", "media_type"))
+                KeyValueRow("年份", item.first(of: "year", "ProductionYear", "premiere_year"))
+                KeyValueRow("Emby ID", item.first(of: "id", "Id", "ItemId"), monospaced: true)
+                if let rating = item.first(of: "rating", "CommunityRating", "vote_average").double {
+                    KeyValueRow("评分", String(format: "%.1f", rating))
+                }
+            }
+
+            if let overview = item.first(of: "overview", "Overview", "summary", "description").displayString,
+               !overview.isEmpty {
+                Section("简介") {
+                    Text(overview).font(.footnote)
+                }
+            }
+
+            Section("位置") {
+                KeyValueRow("媒体库", item.first(of: "library", "LibraryName", "collection_name"))
+                KeyValueRow("路径", item.first(of: "path", "Path"), monospaced: true)
+            }
+        }
+        .navigationTitle(title)
     }
 }

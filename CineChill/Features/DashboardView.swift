@@ -10,7 +10,7 @@ private struct DashboardTrendPoint: Identifiable {
 }
 
 /// 仪表盘：媒体库总览、设备状态、115 账号、任务动态。
-/// 服务端未声明响应结构，因此所有取值都用候选键名兜底，并保留「原始数据」入口。
+/// 服务端未声明响应结构，因此所有取值都用候选键名兜底。
 struct DashboardView: View {
     @EnvironmentObject private var session: AppSession
     @State private var trendDays = 7
@@ -51,7 +51,7 @@ struct DashboardView: View {
             continueWatchingCard(overview)
             librariesCard(mediaStats)
             recentCard(overview)
-            rawCard(value, reload: reload)
+            diagnosticCard(value, reload: reload)
         }
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
@@ -123,7 +123,9 @@ struct DashboardView: View {
                 HStack(spacing: 12) {
                     Label("Emby Server", systemImage: "server.rack")
                     if let version = session.serverVersion {
-                        Label("CineChill v\(version)", systemImage: "movieclapper")
+                        let number = version.trimmingCharacters(in: .whitespacesAndNewlines)
+                            .drop(while: { $0 == "v" || $0 == "V" })
+                        Label("CineChill v\(number)", systemImage: "movieclapper")
                     }
                     Label("\(libraryCount) 个媒体库", systemImage: "cylinder")
                 }
@@ -260,12 +262,6 @@ struct DashboardView: View {
                     }
                     if let vip = drive.deepFirst(of: "vip_name", "vip", "is_vip").displayString {
                         KeyValueRow("会员", vip)
-                    }
-                    NavigationLink {
-                        JSONRawScreen(value: drive, title: "115 账号")
-                    } label: {
-                        Label("查看详情", systemImage: "chevron.right.circle")
-                            .font(.caption)
                     }
                 }
             }
@@ -566,9 +562,9 @@ struct DashboardView: View {
         return URL(string: raw)
     }
 
-    // MARK: - 原始数据
+    // MARK: - 诊断
 
-    private func rawCard(_ value: JSONValue, reload: Reload) -> some View {
+    private func diagnosticCard(_ value: JSONValue, reload: Reload) -> some View {
         let snapshots = [value["stats"], value["metrics"], value["drive115"],
                          value["overview"], value["progress"], value["health"]]
         let available = snapshots.filter { !$0.isNull && !$0.isEmptyContainer }.count
@@ -576,17 +572,8 @@ struct DashboardView: View {
                            trailing: AnyView(
                             StatusBadge("\(available)/\(snapshots.count) 可用",
                                         tone: available == snapshots.count ? .good : .warning)
-                           )) {
+            )) {
             VStack(alignment: .leading, spacing: 10) {
-                diagnosticRawLink("dashboard_stats", value: value["stats"])
-                diagnosticRawLink("device_metrics", value: value["metrics"])
-                diagnosticRawLink("dashboard_115_account", value: value["drive115"])
-                diagnosticRawLink("emby_overview", value: value["overview"])
-                diagnosticRawLink("progress", value: value["progress"])
-                diagnosticRawLink("system_health", value: value["health"])
-
-                Divider()
-
                 NavigationLink {
                     DashboardEndpointDiagnosticsView()
                 } label: {
@@ -602,11 +589,6 @@ struct DashboardView: View {
                 } label: {
                     Label("系统日志", systemImage: "doc.plaintext")
                 }
-                NavigationLink {
-                    JSONRawScreen(value: value, title: "仪表盘完整快照")
-                } label: {
-                    Label("查看完整快照", systemImage: "doc.text.magnifyingglass")
-                }
                 Button {
                     reload.fire()
                 } label: {
@@ -617,29 +599,4 @@ struct DashboardView: View {
         }
     }
 
-    private func diagnosticRawLink(_ title: String, value: JSONValue) -> some View {
-        NavigationLink {
-            JSONRawScreen(value: value, title: title)
-        } label: {
-            HStack(spacing: 8) {
-                Label(title + " 原始数据", systemImage: "curlybraces")
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.8)
-                Spacer(minLength: 8)
-                StatusBadge(diagnosticStatusText(value), tone: diagnosticStatusTone(value))
-            }
-        }
-    }
-
-    private func diagnosticStatusText(_ value: JSONValue) -> String {
-        if value.isNull { return "不可用" }
-        if value.isEmptyContainer { return "空响应" }
-        return "正常"
-    }
-
-    private func diagnosticStatusTone(_ value: JSONValue) -> BadgeTone {
-        if value.isNull { return .bad }
-        if value.isEmptyContainer { return .warning }
-        return .good
-    }
 }

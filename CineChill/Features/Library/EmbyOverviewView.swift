@@ -25,13 +25,6 @@ struct EmbyOverviewView: View {
                 overviewCard(value["overview"])
                 librariesCard(value["overview"], covers: value["covers"])
                 toolsCard(libraries: libraryList(value["overview"], covers: value["covers"]))
-                CardSection(title: "原始数据", systemImage: "curlybraces") {
-                    NavigationLink {
-                        JSONRawScreen(value: value, title: "Emby 总览")
-                    } label: {
-                        Label("查看接口返回", systemImage: "chevron.right.circle").font(.subheadline)
-                    }
-                }
             }
         }
         .actionFeedback(runner)

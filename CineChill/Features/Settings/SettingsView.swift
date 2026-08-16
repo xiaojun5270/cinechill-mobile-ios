@@ -6,6 +6,7 @@ struct SettingsView: View {
     @EnvironmentObject private var lock: AppLock
     @EnvironmentObject private var notifier: TaskNotifier
     @AppStorage(chromeStyleKey) private var chromeRaw = ChromeStyle.liquidGlass.rawValue
+    @AppStorage(appColorModeKey) private var colorModeRaw = AppColorMode.system.rawValue
 
     private var chromeTitle: String {
         (ChromeStyle(rawValue: chromeRaw) ?? .liquidGlass).title
@@ -22,19 +23,42 @@ struct SettingsView: View {
 
     var body: some View {
         List {
-            Section("账号") {
-                ModuleRow(title: "当前账号",
+            Section("明暗模式") {
+                Picker("明暗模式", selection: $colorModeRaw) {
+                    ForEach(AppColorMode.allCases) { option in
+                        Label(option.title, systemImage: option.systemImage)
+                            .tag(option.rawValue)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+            }
+
+            Section("系统配置") {
+                ModuleRow(title: "服务器配置",
+                          subtitle: "115 账号、Emby 直链与扫描目录",
+                          systemImage: "server.rack",
+                          tint: .blue) { Config302View() }
+                ModuleRow(title: "通知配置",
+                          subtitle: "Telegram、企业微信与通知模板",
+                          systemImage: "bell",
+                          tint: .cyan) { NotifyView() }
+                ModuleRow(title: "账户管理",
                           subtitle: session.displayUsername,
-                          systemImage: "person.crop.circle",
-                          tint: .blue) { AccountView() }
-                ModuleRow(title: "服务器",
+                          systemImage: "person.2.badge.gearshape",
+                          tint: .indigo) { AccountView() }
+                ModuleRow(title: "AI助手",
+                          subtitle: "剧集识别、记忆、提醒与工具权限",
+                          systemImage: "brain.head.profile",
+                          tint: .purple) { AIAssistantView() }
+            }
+
+            Section("本机与连接") {
+                ModuleRow(title: "服务器连接",
                           subtitle: session.activeServer?.baseURLString ?? "未配置",
                           systemImage: "server.rack",
                           tint: .indigo) { ServerListView() }
-            }
-
-            Section("这台设备") {
-                ModuleRow(title: "外观",
+                ModuleRow(title: "导航栏外观",
                           subtitle: "导航栏：\(chromeTitle)",
                           systemImage: "paintbrush.pointed",
                           tint: .indigo) { AppearanceView() }
@@ -48,26 +72,11 @@ struct SettingsView: View {
                           tint: .red) { TaskNotifyView() }
             }
 
-            Section("服务端配置") {
-                ModuleRow(title: "302 与网盘",
-                          subtitle: "115 账号、Emby 直链、扫描目录",
-                          systemImage: "externaldrive.connected.to.line.below",
-                          tint: .teal) { Config302View() }
+            Section("高级配置") {
                 ModuleRow(title: "服务端参数",
                           subtitle: "config.json 全量编辑与重启",
                           systemImage: "slider.horizontal.3",
                           tint: .gray) { ServerConfigView() }
-                ModuleRow(title: "通知渠道",
-                          subtitle: "Telegram、企业微信",
-                          systemImage: "bell.badge",
-                          tint: .orange) { NotifyView() }
-            }
-
-            Section("智能与素材") {
-                ModuleRow(title: "AI 助手",
-                          subtitle: "剧集识别、记忆、提醒、工具权限",
-                          systemImage: "sparkles",
-                          tint: .purple) { AIAssistantView() }
                 ModuleRow(title: "资源与模板",
                           subtitle: "字体、布局、模板、译名、套件",
                           systemImage: "paintpalette",
@@ -277,8 +286,8 @@ struct AboutView: View {
                 KeyValueRow("接口基线", "CineChill UI v1.0.0.43 OpenAPI")
             }
             Section {
-                Text("服务端接口未声明响应结构，所有页面都会尽量匹配常见字段名，并在每屏底部提供「原始数据」以便核对实际返回内容。")
-                Text("若某个字段显示为「—」，说明服务端返回的键名与预期不同，可从原始数据中确认后反馈。")
+                Text("服务端部分接口未声明响应结构，App 会兼容常见字段命名，并将接口检查集中在仪表盘的诊断页面。")
+                Text("若某个字段显示为「—」，可运行完整接口诊断确认服务端是否返回了对应数据。")
             } header: {
                 Text("已知限制")
             }

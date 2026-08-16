@@ -37,7 +37,7 @@ struct Cloud115RapidView: View {
             recentJobSection
             lookupSection
         }
-        .navigationTitle("云端秒传")
+        .navigationTitle("网盘资源秒传")
         .actionFeedback(runner)
         .sheet(isPresented: $pickingFiles) {
             NavigationStack {

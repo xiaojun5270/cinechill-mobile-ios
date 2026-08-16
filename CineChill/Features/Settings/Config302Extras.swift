@@ -117,6 +117,7 @@ struct Emby302EditorView: View {
 struct Qrcode115LoginView: View {
     let config: JSONValue
     let reload: Reload
+    var title = "115 扫码登录"
 
     @EnvironmentObject private var session: AppSession
     @StateObject private var runner = ActionRunner()
@@ -203,7 +204,7 @@ struct Qrcode115LoginView: View {
                 }
             }
         }
-        .navigationTitle("115 扫码登录")
+        .navigationTitle(title)
         .actionFeedback(runner)
         .task {
             guard !prepared else { return }
@@ -407,13 +408,13 @@ struct StandardTopologyView: View {
     }
 }
 
-/// 302 原始配置编辑。
-struct Config302RawView: View {
+/// 302 全量高级配置编辑。
+struct Config302AdvancedConfigView: View {
     @EnvironmentObject private var session: AppSession
 
     var body: some View {
         JSONConfigScreen(
-            title: "302 原始配置",
+            title: "302 高级配置",
             note: "drives 为 115 账号数组，embys 为 Emby 直链数组。保存会整体覆盖服务端 302 配置。",
             unwrapKeys: ["config", "data"],
             load: {

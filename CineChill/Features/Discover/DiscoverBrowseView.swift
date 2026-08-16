@@ -97,7 +97,6 @@ struct DiscoverBrowseView: View {
             filterCard(value["genres"])
             resultCard(value["results"])
             toolCard
-            rawCard(value)
         }
         .id(queryKey)
     }
@@ -284,7 +283,7 @@ struct DiscoverBrowseView: View {
         .font(.subheadline)
     }
 
-    // MARK: - 工具与原始数据
+    // MARK: - 工具
 
     private var toolCard: some View {
         CardSection(title: "工具", systemImage: "wrench.and.screwdriver") {
@@ -312,16 +311,6 @@ struct DiscoverBrowseView: View {
         }
     }
 
-    private func rawCard(_ value: JSONValue) -> some View {
-        CardSection(title: "原始数据", systemImage: "curlybraces") {
-            NavigationLink {
-                JSONRawScreen(value: value, title: "浏览发现")
-            } label: {
-                Label("查看接口返回", systemImage: "chevron.right.circle")
-                    .font(.subheadline)
-            }
-        }
-    }
 }
 
 /// 单个发现数据源的推荐结果：`/api/discover/provider/{source_key}`。
@@ -351,14 +340,6 @@ struct DiscoverProviderView: View {
                 .font(.subheadline)
             }
             PosterGrid(items: items)
-            CardSection(title: "原始数据", systemImage: "curlybraces") {
-                NavigationLink {
-                    JSONRawScreen(value: value, title: title)
-                } label: {
-                    Label("查看接口返回", systemImage: "chevron.right.circle")
-                        .font(.subheadline)
-                }
-            }
         }
     }
 }
@@ -429,11 +410,13 @@ struct DoubanResolveView: View {
                 JSONInspector(value: runner.lastResult, title: "匹配响应")
             }
         }
+#if DEBUG
         if !requestBody.isNull {
             Section("调试") {
                 JSONInspector(value: requestBody, title: "请求体")
             }
         }
+#endif
     }
 
     private var resolvedPairs: [(key: String, value: JSONValue)] {
@@ -490,16 +473,18 @@ struct TmdbArtworkBatchView: View {
             } header: {
                 Text("参数")
             } footer: {
-                Text("识别到 \(parsedIDs.count) 个 ID。请求体字段名以服务端为准，可在下方核对。")
+                Text("识别到 \(parsedIDs.count) 个 ID，将按服务端批量接口提交。")
             }
 
             resultSection
 
+#if DEBUG
             if !requestBody.isNull {
                 Section("调试") {
                     JSONInspector(value: requestBody, title: "请求体")
                 }
             }
+#endif
         }
         .navigationTitle("批量海报")
         .actionFeedback(runner)
@@ -612,11 +597,13 @@ struct EmbyItemsDeleteView: View {
                 }
             }
 
+#if DEBUG
             if !requestBody.isNull {
                 Section("调试") {
                     JSONInspector(value: requestBody, title: "请求体")
                 }
             }
+#endif
         }
         .navigationTitle("删除 Emby 条目")
         .confirmationDialog("确认删除 \(parsedIDs.count) 个 Emby 条目？",
