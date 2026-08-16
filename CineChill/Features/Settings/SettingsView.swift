@@ -3,6 +3,22 @@ import SwiftUI
 /// 设置标签页：账号、服务器、302、通知、AI、资源、升级。
 struct SettingsView: View {
     @EnvironmentObject private var session: AppSession
+    @EnvironmentObject private var lock: AppLock
+    @EnvironmentObject private var notifier: TaskNotifier
+    @AppStorage(chromeStyleKey) private var chromeRaw = ChromeStyle.liquidGlass.rawValue
+
+    private var chromeTitle: String {
+        (ChromeStyle(rawValue: chromeRaw) ?? .liquidGlass).title
+    }
+
+    private var lockSubtitle: String {
+        lock.isEnabled ? "已开启 · \(lock.availability.title)" : "未开启"
+    }
+
+    private var notifySubtitle: String {
+        guard notifier.isEnabled else { return "未开启" }
+        return notifier.backgroundEnabled ? "已开启 · 含后台检查" : "已开启 · 仅前台"
+    }
 
     var body: some View {
         List {
@@ -15,6 +31,25 @@ struct SettingsView: View {
                           subtitle: session.activeServer?.baseURLString ?? "未配置",
                           systemImage: "server.rack",
                           tint: .indigo) { ServerListView() }
+            }
+
+            Section("这台设备") {
+                ModuleRow(title: "全部功能",
+                          subtitle: "\(ModuleIndex.all.count) 个页面，可搜索与收藏",
+                          systemImage: "square.grid.3x3.square",
+                          tint: .blue) { ModuleSearchView() }
+                ModuleRow(title: "外观",
+                          subtitle: "导航栏：\(chromeTitle)",
+                          systemImage: "paintbrush.pointed",
+                          tint: .indigo) { AppearanceView() }
+                ModuleRow(title: "应用锁",
+                          subtitle: lockSubtitle,
+                          systemImage: "faceid",
+                          tint: .green) { AppLockView() }
+                ModuleRow(title: "任务通知",
+                          subtitle: notifySubtitle,
+                          systemImage: "bell.badge",
+                          tint: .red) { TaskNotifyView() }
             }
 
             Section("服务端配置") {
@@ -236,8 +271,9 @@ struct AboutView: View {
         List {
             Section("客户端") {
                 KeyValueRow("名称", "CineChill for iOS")
-                KeyValueRow("界面覆盖", "28 个模块 / 全量对齐 Web 后台")
+                KeyValueRow("界面覆盖", "\(ModuleIndex.all.count) 个页面 / 全量对齐 Web 后台")
                 KeyValueRow("最低系统", "iOS 17.0")
+                KeyValueRow("导航栏材质", GlassChrome.systemDrawsGlass ? "系统液态玻璃" : "自绘玻璃拟态")
             }
             Section("服务端") {
                 KeyValueRow("地址", session.activeServer?.baseURLString ?? "—", monospaced: true)
@@ -252,6 +288,8 @@ struct AboutView: View {
             }
             Section {
                 Text("允许自签名证书是按服务器单独开启的选项，开启后该主机不再校验 HTTPS 证书，仅建议在可信局域网内使用。")
+                Text("应用锁使用系统 Face ID / Touch ID，只挡本机界面；服务端接口本身仍依赖账号密码鉴权。")
+                Text("后台任务检查由系统按使用习惯调度，间隔可能从十几分钟到数小时；需要准确时间请在前台手动检查。")
             } header: {
                 Text("安全提示")
             }

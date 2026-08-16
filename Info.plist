@@ -28,7 +28,14 @@
 		<true/>
 	</dict>
 	<key>UILaunchScreen</key>
-	<dict/>
+	<dict>
+		<key>UIColorName</key>
+		<string>LaunchBackground</string>
+		<key>UIImageName</key>
+		<string>LaunchLogo</string>
+		<key>UIImageRespectsSafeAreaInsets</key>
+		<true/>
+	</dict>
 	<key>UIRequiredDeviceCapabilities</key>
 	<array>
 		<string>arm64</string>
@@ -48,6 +55,16 @@
 	</array>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>用于连接你在局域网内自建的 CineChill 服务器。</string>
+	<key>NSFaceIDUsageDescription</key>
+	<string>用于解锁 CineChill，避免他人拿到手机后直接操作你的媒体服务器。</string>
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>fetch</string>
+	</array>
+	<key>BGTaskSchedulerPermittedIdentifiers</key>
+	<array>
+		<string>com.cinechill.mobile.taskrefresh</string>
+	</array>
 	<key>NSAppTransportSecurity</key>
 	<dict>
 		<key>NSAllowsArbitraryLoads</key>

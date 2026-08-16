@@ -4,11 +4,11 @@
 
 ## 交付内容
 
-`CineChill.xcodeproj` 是可直接打开的 Xcode 工程，`CineChill/` 是全部 SwiftUI 源码（88 个 Swift 文件，约 19990 行），`Info.plist` 位于仓库根目录并通过 `INFOPLIST_FILE` 引用。工程采用 Xcode 16 的「同步文件夹」（`PBXFileSystemSynchronizedRootGroup`，`objectVersion = 77`）组织源码，因此新增或删除 `CineChill/` 下的文件不需要改动工程文件，但**必须用 Xcode 16 或更新版本打开**；更旧的 Xcode 无法识别这种工程格式。
+`CineChill.xcodeproj` 是可直接打开的 Xcode 工程，`CineChill/` 是全部 SwiftUI 源码（95 个 Swift 文件，约 22030 行），`Info.plist` 位于仓库根目录并通过 `INFOPLIST_FILE` 引用。工程采用 Xcode 16 的「同步文件夹」（`PBXFileSystemSynchronizedRootGroup`，`objectVersion = 77`）组织源码，因此新增或删除 `CineChill/` 下的文件不需要改动工程文件，但**必须用 Xcode 16 或更新版本打开**；更旧的 Xcode 无法识别这种工程格式。
 
-在 Mac 上打开 `CineChill.xcodeproj` 后，选中 `CineChill` target，在 Signing & Capabilities 里换成你自己的开发团队（Bundle ID 默认是 `com.cinechill.mobile`，可自行修改），然后选真机或模拟器运行即可。部署目标是 iOS 17.0，Swift 语言版本 5，iPhone 与 iPad 通用。App 图标位只在 `Assets.xcassets/AppIcon.appiconset` 里预留了 1024×1024 的槽位而没有放图片，首次归档上传 App Store 前需要自己补一张；开发调试不受影响。
+在 Mac 上打开 `CineChill.xcodeproj` 后，选中 `CineChill` target，在 Signing & Capabilities 里换成你自己的开发团队（Bundle ID 默认是 `com.cinechill.mobile`，可自行修改），然后选真机或模拟器运行即可。部署目标是 iOS 17.0，Swift 语言版本 5，iPhone 与 iPad 通用。App 图标是脚本生成的纯色渐变胶片图形，`AppIcon.appiconset` 里放了 1024×1024 的浅色、深色与 tinted 三套单尺寸图（iOS 17 的单一尺寸规范），启动屏用 `Info.plist` 的 `UILaunchScreen` 配合 `LaunchBackground` 颜色与 `LaunchLogo` 图片，不需要 storyboard。想换成自己的图，替换 `Assets.xcassets` 里的同名文件即可。
 
-需要特别说明的是，本机是 Windows + Linux 容器环境，没有 Swift 工具链，所以这份代码**没有经过编译验证**。为了把风险降到最低，所有 API 调用点、模型初始化参数标签、复用组件签名都用脚本逐一比对过生成代码，检查项包括括号配平、重复类型声明、`api.<分组>.<方法>` 是否存在、99 个请求模型的参数标签是否匹配、`session.` 与 `Fmt.` 成员是否存在、是否有声明了却没被引用的视图、以及 ViewBuilder 单块子视图是否超过 10 个上限。这些检查目前全部通过，但首次在 Xcode 里编译时仍可能出现少量类型推断或可选值层面的报错，属于预期范围。
+需要特别说明的是，本机是 Windows + Linux 容器环境，没有 Swift 工具链，所以这份代码**没有经过编译验证**。为了把风险降到最低，所有 API 调用点、模型初始化参数标签、复用组件签名都用脚本逐一比对过生成代码，检查项包括括号配平、重复类型声明、`api.<分组>.<方法>` 是否存在、99 个请求模型的参数标签是否匹配、`session.` 与 `Fmt.` 成员是否存在、是否有声明了却没被引用的视图、ViewBuilder 单块子视图是否超过 10 个上限，以及功能索引里 81 个条目的 id 唯一性与目标视图是否真实存在。这些检查目前全部通过，但首次在 Xcode 里编译时仍可能出现少量类型推断或可选值层面的报错，属于预期范围。
 
 ## 架构
 
@@ -20,7 +20,7 @@
 
 `CineChill/UI/` 是共用组件：`RemoteList` / `RemoteScroll` 负责加载态、失败重试与下拉刷新；`ActionRunner` + `.actionFeedback` 负责写操作的进行中状态与结果提示；`SSEStreamView` 负责所有 SSE 长连接页面；`JSONObjectEditor`、`JSONConfigScreen` 把「服务端返回什么就编辑什么」的配置类接口做成通用表单，未知字段也能改；`KeyValueRow`、`StatusBadge`、`MetricTile`、`PosterCard`、`ModuleRow`、`RemoteImage` 等负责统一视觉。
 
-`CineChill/Features/` 按 Tab 分子目录：`Automation/` 16 个文件、`Library/` 10 个、`Settings/` 9 个、`Discover/` 5 个、`System/` 2 个，共 129 个视图。`App/` 是入口与 Tab 容器，`Core/` 7 个文件（网络、错误、会话、服务器档案、SSE、JSON、格式化），`API/` 4 + 27 个文件，`UI/` 4 个。
+`CineChill/Features/` 按 Tab 分子目录：`Automation/` 16 个文件、`Library/` 10 个、`Settings/` 10 个、`Discover/` 5 个、`System/` 2 个，共 141 个视图结构体。`App/` 4 个文件（入口、根视图、Tab / 侧边栏容器、功能索引），`Core/` 9 个（网络、错误、会话、服务器档案、SSE、JSON、格式化、应用锁、任务通知），`API/` 4 + 27 个，`UI/` 7 个。
 
 ## 界面组织
 
@@ -29,6 +29,20 @@
 按 API 分组看，Discover(40)、RSS(22)、Notify(21)、Drive115Upload(21)、DockerManager(20)、AIEpisodeResolver(17)、Resources(16)、media_organize(14)、Server(13)、Tasks(13)、ForwardAiying(13)、config_302(11)、OrganizeHistory(10)、EmbyUsers(10)、MoviePilot(7)、Drive115Cleanup(7)、Subscriptions(7)、strm(6)、SystemHealth(5)、EmbyTasks(5)、FnosSign(5)、Auth(4)、Webhook(4)、Transfer(3)、Upgrade(3)、public(2) 均有对应界面入口。300 个方法中 297 个在界面里被实际调用，剩下 3 个是设计上不该由手机端调用的：`wechatCallbackVerify` 与 `wechatCallbackMessage` 是企业微信回调服务端的被动接口；`embyCoverProxyURL` 需要服务端用 HMAC 算出的 `ts` 与 `sig`，接口文档里明确写的是「供企业微信等外部服务抓取」，客户端无法也不应自己签名。
 
 三个 SSE 长连接接口都已接上：系统日志页有「实时日志」（`/api/system_logs/stream`，自动滚动、最多保留 1000 行），浏览发现页有「实时事件」（`/api/discover/events`），资源搜索页有「流式搜索」（`/api/forward/search_resources/stream`，各资源站边搜边推）。它们共用 `Core/EventStream.swift` 的 SSE 解析与 `UI/SSEStreamView.swift`，进页面即连接、退出即断开。
+
+## 手机端专属能力
+
+Web 后台没有、但手机上很需要的几件事，都做在了 `App/ModuleIndex.swift` 与 `Core/` 里。
+
+**全局功能搜索与收藏。**81 个二级页面登记在 `ModuleIndex` 里，每条记录带标题、所属分组、所属 Tab、图标、以及包含接口路径的关键词（例如搜 `/api/rss` 或搜「秒传」都能命中）。仪表盘右上角的放大镜、设置页「这台设备 → 全部功能」都进得去，搜索框支持空格分词的 AND 匹配。列表里左滑或长按任意页面即可收藏，收藏与最近访问（最多 8 条）会出现在仪表盘顶部的「常用」卡片和 iPad 侧边栏里，存在 `UserDefaults` 的 `modules.favorites` / `modules.recents`。
+
+**iPad 分栏布局。**`MainTabView` 按 `horizontalSizeClass` 分流：紧凑宽度走原来的五个 Tab，regular 宽度（iPad 全屏、以及 iPad 分屏较宽的一侧）走 `NavigationSplitView`，左栏是五个模块加收藏页，右栏是独立的 `NavigationStack`。切换左栏条目时用 `.id(selection)` 重建右栏导航栈，避免上一个模块的详情页留在右侧。
+
+**Face ID 应用锁。**`Core/AppLock.swift` + `UI/AppLockGate.swift`。开启后每次回到前台都要通过 Face ID / Touch ID（或系统密码兜底），`LAContext` 不可用的设备会直接说明原因而不是留一个开不了的开关；开关只在验证成功后才真正打开，不会把自己锁在外面。它挡的是本机界面，服务端接口本身仍然依赖账号密码鉴权。
+
+**任务完成通知。**`Core/TaskNotifier.swift` 每 45 秒在前台拉一次 `/api/progress`，把上一轮「在跑」而这一轮已完成或已消失的任务算作完成并发本地通知，失败的单独发一条「任务未完成」。首次开启只建立基线、不发通知，避免一次性弹一堆。开了「后台检查」后会注册 `BGAppRefreshTaskRequest`（标识 `com.cinechill.mobile.taskrefresh`，最短间隔 15 分钟），后台唤醒时用 `ServerStore` + 钥匙串里的信息自己建客户端，先试 Cookie、过期才静默登录一次，两者都不成立就安静放弃。**iOS 的后台刷新是「有机会才跑」**，实际间隔可能从十几分钟到数小时，要准时就在前台手动点「立即检查一次」。
+
+**液态玻璃导航栏。**`UI/GlassChrome.swift`。真正的 Liquid Glass 是 iOS 26 + Xcode 26 SDK 的系统行为，只要用新 SDK 重新编译，标准导航栏 / 标签栏 / 工具栏就自动是玻璃材质。所以这里做的是双轨：检测到「用 iOS 26 SDK 编译」且「跑在 iOS 26 及以上」时（`#if compiler(>=6.2)` 加运行时 `isOperatingSystemAtLeast(26)`），完全不干预，让系统自己画；否则在 iOS 17–18 上用 `UINavigationBarAppearance` / `UITabBarAppearance` / `UIToolbarAppearance` 的 `backgroundEffect` 装上 `.systemUltraThinMaterial` 模糊、去掉分割线、并把 scrollEdge 状态设成全透明，做出「静止时与内容连成一片、滚动时结霜」的近似效果。代码里没有出现任何 iOS 26 才有的符号名，因此用 Xcode 16 编译也不会报找不到 API。设置页「这台设备 → 外观」可以在「液态玻璃 / 磨砂玻璃 / 系统默认」之间切换——玻璃材质在浅色壁纸或高对比内容上有时会影响标题可读性，觉得不舒服就切回系统默认。
 
 ## 服务器连接与登录
 
@@ -51,6 +65,10 @@
 第二，服务器配置里有「允许不受信任的证书」开关（`allowInsecureTLS`），打开后对该服务器跳过证书校验，用于自签证书场景。这会让该连接失去中间人攻击防护，只在你确认网络环境可信时打开，并且它是按服务器逐个生效的，不是全局开关。
 
 第三，`NSLocalNetworkUsageDescription` 已填写，首次访问局域网地址时系统会弹权限提示，拒绝后无法连接自建服务器。
+
+第四，后台任务检查会在会话 Cookie 过期时读取钥匙串里的密码静默登录一次。这是「勾选记住密码」的既有代价，不是新增的存储；如果不希望密码在后台被使用，关掉「任务通知 → 后台检查」，或者在服务器配置里不勾记住密码（那样每次启动都要手输）。
+
+第五，`Info.plist` 里为这些能力声明了 `NSFaceIDUsageDescription`、`UIBackgroundModes = fetch` 与 `BGTaskSchedulerPermittedIdentifiers`。通知权限是首次开启开关时才申请的，拒绝后开关不会打开，界面会给一个跳系统设置的入口。
 
 ## 已知限制
 

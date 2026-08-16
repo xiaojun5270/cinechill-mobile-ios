@@ -22,6 +22,7 @@ struct DashboardView: View {
             ])
         } content: { value, reload in
             greeting
+            FavoriteModulesCard()
             libraryOverview(value["stats"])
             deviceCard(value["metrics"])
             drive115Card(value["drive115"])
@@ -29,6 +30,15 @@ struct DashboardView: View {
             librariesCard(value["stats"])
             recentCard(value["stats"])
             rawCard(value, reload: reload)
+        }
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                NavigationLink {
+                    ModuleSearchView()
+                } label: {
+                    Label("全部功能", systemImage: "magnifyingglass")
+                }
+            }
         }
     }
 
