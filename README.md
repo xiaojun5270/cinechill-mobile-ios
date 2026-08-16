@@ -8,7 +8,7 @@
 
 在 Mac 上打开 `CineChill.xcodeproj` 后，选中 `CineChill` target，在 Signing & Capabilities 里换成你自己的开发团队（Bundle ID 默认是 `com.cinechill.mobile`，可自行修改），然后选真机或模拟器运行即可。部署目标是 iOS 17.0，Swift 语言版本 5，iPhone 与 iPad 通用。App 图标是脚本生成的纯色渐变胶片图形，`AppIcon.appiconset` 里放了 1024×1024 的浅色、深色与 tinted 三套单尺寸图（iOS 17 的单一尺寸规范），启动屏用 `Info.plist` 的 `UILaunchScreen` 配合 `LaunchBackground` 颜色与 `LaunchLogo` 图片，不需要 storyboard。想换成自己的图，替换 `Assets.xcassets` 里的同名文件即可。
 
-需要特别说明的是，本机是 Windows + Linux 容器环境，没有 Swift 工具链，所以这份代码**没有经过编译验证**。为了把风险降到最低，所有 API 调用点、模型初始化参数标签、复用组件签名都用脚本逐一比对过生成代码，检查项包括括号配平、重复类型声明、`api.<分组>.<方法>` 是否存在、99 个请求模型的参数标签是否匹配、`session.` 与 `Fmt.` 成员是否存在、是否有声明了却没被引用的视图、ViewBuilder 单块子视图是否超过 10 个上限，以及功能索引里 81 个条目的 id 唯一性与目标视图是否真实存在。这些检查目前全部通过，但首次在 Xcode 里编译时仍可能出现少量类型推断或可选值层面的报错，属于预期范围。
+需要特别说明的是，本机是 Windows + Linux 容器环境，没有 Swift 工具链，所以代码是靠约束写法加脚本静态校验写出来的：所有 API 调用点、模型初始化参数标签、复用组件签名都用脚本逐一比对过生成代码，检查项包括括号配平、重复类型声明、`api.<分组>.<方法>` 是否存在、99 个请求模型的参数标签是否匹配、`session.` 与 `Fmt.` 成员是否存在、是否有声明了却没被引用的视图、ViewBuilder 单块子视图是否超过 10 个上限、功能索引里 81 个条目的 id 唯一性与目标视图是否真实存在，以及每个索引入口是否真的能无参构造。真正的编译验证交给 GitHub Actions，**目前已在 macOS runner 的 Xcode 16.4 / iPhoneOS 18.5 SDK 上编译通过并打出 IPA**（见下文）。带全部新功能的第一次构建失败过一次，原因是 `TelegramLoginView` 的三个 `@State` 属性没写默认值——属性包装器并不会让属性免于进入 memberwise 初始化器，于是那个视图没有无参初始化器，而功能索引正是用 `TelegramLoginView()` 打开它的；这条规则已经补进校验脚本。
 
 ## 架构
 
@@ -54,7 +54,7 @@ Web 后台没有、但手机上很需要的几件事，都做在了 `App/ModuleI
 
 打包用的是 `xcodebuild build` 加上 `CODE_SIGNING_ALLOWED=NO`，产物 `.app` 塞进 `Payload/` 后压成 `.ipa`，并删掉可能残留的 `_CodeSignature`。这样得到的包**不能直接装到 iPhone 上**，必须自己签：AltStore 或 Sideloadly 用 Apple ID 自签（免费账号 7 天有效期），或者用付费开发者证书、企业证书重签。想省掉这一步就得在工作流里塞证书与描述文件，那需要把 p12 和 profile 放进仓库 Secrets——目前没有这么做。
 
-因为这份代码从没在真机工具链上编译过，第一次跑 workflow 大概率会因为零星类型推断问题失败。失败时工作流会自动把 `build.log` 里所有 `error:` 行打印到日志末尾，把那几行发我就能定位。
+工作流已经跑通：`main` 上最新提交在 macos-15 + Xcode 16.4（iPhoneOS 18.5 SDK、`-swift-version 5`、Release + 全模块优化）下编译通过，产出的无证书 IPA 约 3.5 MB。编译失败时工作流会把 `build.log` 里所有 `error:` 行打印到日志末尾，并把同一份摘要写进 Job Summary，也就是 Actions 页面里 run 概览直接能看到的那块，不用下载 artifact。
 
 工作流固定 `runs-on: macos-15`，并在开跑前检查 Xcode 主版本是否 ≥ 16（工程是 objectVersion 77 的同步文件夹格式，Xcode 15 打不开），版本不够会先找 `/Applications/Xcode_16*.app` 再切换，找不到就直接报错退出而不是编译到一半才失败。
 
