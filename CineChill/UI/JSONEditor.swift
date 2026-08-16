@@ -55,7 +55,7 @@ public extension Binding where Value == JSONValue {
 func isSecretKey(_ key: String) -> Bool {
     let lower = key.lowercased()
     return ["password", "passwd", "secret", "token", "cookie", "api_key", "apikey",
-            "app_secret", "private", "credential", "bot_token", "api_hash"]
+            "tmdb_key", "app_secret", "private", "credential", "bot_token", "api_hash"]
         .contains { lower.contains($0) }
 }
 
@@ -117,6 +117,10 @@ enum ConfigLabels {
         "app_secret": "应用密钥",
         "agent_id": "AgentId",
         "proxy_url": "代理地址",
+        "tmdb_key": "TMDB API Key",
+        "douban_cookie": "豆瓣 Cookie",
+        "app_public_base_url": "公开访问地址",
+        "log_level": "日志级别",
         "channel_name": "渠道名称",
         "account_monitor_enabled": "账号监听",
         "api_id": "API ID",

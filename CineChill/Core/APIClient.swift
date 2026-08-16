@@ -211,7 +211,7 @@ public final class APIClient: @unchecked Sendable {
         switch error.code {
         case .cancelled: return .cancelled
         case .userAuthenticationRequired: return .unauthorized
-        default: return .network(error.localizedDescription)
+        default: return .network(code: error.errorCode, message: error.localizedDescription)
         }
     }
 

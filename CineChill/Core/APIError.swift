@@ -11,7 +11,7 @@ public enum HTTPMethod: String, Sendable {
 public enum APIError: LocalizedError, Sendable {
     case noServerConfigured
     case invalidURL(String)
-    case network(String)
+    case network(code: Int, message: String)
     case unauthorized
     case validation([String])
     case server(status: Int, message: String?)
@@ -24,8 +24,8 @@ public enum APIError: LocalizedError, Sendable {
             return "尚未配置服务器，请先在「设置 → 服务器」中添加。"
         case .invalidURL(let s):
             return "地址无法解析：\(s)"
-        case .network(let s):
-            return "网络请求失败：\(s)"
+        case .network(_, let message):
+            return "网络请求失败：\(message)"
         case .unauthorized:
             return "登录已失效，请重新登录。"
         case .validation(let messages):
@@ -43,6 +43,13 @@ public enum APIError: LocalizedError, Sendable {
     public var isAuthFailure: Bool {
         if case .unauthorized = self { return true }
         return false
+    }
+
+    /// POST 已经发出后连接中断或超时，服务端可能仍在执行，调用方不应盲目重试。
+    public var isAmbiguousWriteCompletion: Bool {
+        guard case .network(let code, _) = self else { return false }
+        return code == URLError.Code.networkConnectionLost.rawValue
+            || code == URLError.Code.timedOut.rawValue
     }
 }
 

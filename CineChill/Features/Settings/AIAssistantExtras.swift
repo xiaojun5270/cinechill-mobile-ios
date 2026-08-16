@@ -11,9 +11,14 @@ struct AIMemoryView: View {
     var body: some View {
         RemoteList(title: "记忆与人设") {
             let api = try session.requireAPI()
+            let memory = try await api.ai.readAiAssistantMemory()
             let profile = await Probe.json { try await api.ai.readAiAssistantMemoryProfile() }
-            let memory = await Probe.json { try await api.ai.readAiAssistantMemory() }
-            return JSONValue.object(["profile": profile, "memory": memory])
+            let effectiveProfile = profile.deepFirst(of: "robot_prompt", "user_prompt", "notes_prompt").isNull
+                ? memory["global_profile"] : profile
+            return .object([
+                "profile": effectiveProfile,
+                "memory": memory,
+            ])
         } content: { value, reload in
             Section("助手人设") {
                 TextField("助手设定", text: $robotPrompt, axis: .vertical)
@@ -43,17 +48,20 @@ struct AIMemoryView: View {
                 Text("这三段文本会拼进每次对话的系统提示，用于让助手记住长期偏好。")
             }
 
-            let memories = value["memory"].list("memories", "items", "records", "data")
-            Section("记忆条目（\(memories.count)）") {
-                if memories.isEmpty { EmptyRow("没有记忆条目") }
-                ForEach(Array(memories.prefix(100).enumerated()), id: \.offset) { _, item in
+            let users = value["memory"]["users"].object ?? [:]
+            Section("用户长期记忆（\(users.count)）") {
+                if users.isEmpty { EmptyRow("暂无用户长期记忆") }
+                ForEach(users.keys.sorted(), id: \.self) { userID in
+                    let entries = users[userID]?.list("memories", "items") ?? []
+                    let preview = entries.compactMap {
+                        $0.first(of: "memory", "text", "content").displayString
+                    }.prefix(3).joined(separator: "；")
                     VStack(alignment: .leading, spacing: 3) {
-                        Text(item.first(of: "content", "text", "summary").displayString ?? "—")
-                            .font(.caption)
-                            .lineLimit(4)
-                        if let time = item.first(of: "created_at", "time", "updated_at").displayString {
-                            Text(Fmt.relative(.string(time)))
-                                .font(.caption2).foregroundStyle(.tertiary)
+                        Text(userID).font(.subheadline.weight(.medium))
+                        Text("\(entries.count) 条记忆")
+                            .font(.caption).foregroundStyle(.secondary)
+                        if !preview.isEmpty {
+                            Text(preview).font(.caption2).foregroundStyle(.tertiary).lineLimit(3)
                         }
                     }
                 }
@@ -77,15 +85,7 @@ struct AIRemindersView: View {
     @EnvironmentObject private var session: AppSession
     @StateObject private var runner = ActionRunner()
     @State private var status = ""
-    @State private var draftText = ""
-    @State private var draftDate = Date().addingTimeInterval(3600)
     @State private var queryKey = 0
-
-    private static let formatter: ISO8601DateFormatter = {
-        let formatter = ISO8601DateFormatter()
-        formatter.formatOptions = [.withInternetDateTime]
-        return formatter
-    }()
 
     var body: some View {
         RemoteList(title: "提醒事项") {
@@ -96,33 +96,24 @@ struct AIRemindersView: View {
             Section {
                 Picker("状态", selection: $status) {
                     Text("全部").tag("")
-                    Text("待处理").tag("pending")
+                    Text("待执行").tag("scheduled")
+                    Text("执行中").tag("running")
                     Text("已完成").tag("done")
+                    Text("失败").tag("failed")
                     Text("已取消").tag("cancelled")
+                    Text("已过期").tag("expired")
                 }
                 .onChange(of: status) { _, _ in queryKey += 1 }
             }
 
-            Section("新建提醒") {
-                TextField("提醒内容", text: $draftText, axis: .vertical)
-                DatePicker("提醒时间", selection: $draftDate)
-                Button {
-                    runner.run("已创建", operation: {
-                        let api = try session.requireAPI()
-                        let iso = Self.formatter.string(from: draftDate)
-                        return try await api.ai.createAiAssistantReminder(
-                            .object(["content": .string(draftText),
-                                     "text": .string(draftText),
-                                     "remind_at": .string(iso),
-                                     "status": .string("pending")]))
-                    }, onSuccess: {
-                        draftText = ""
-                        await reload()
-                    })
+            Section {
+                NavigationLink {
+                    AIReminderEditorView(reminder: nil) {
+                        reload.fire()
+                    }
                 } label: {
-                    Label("创建", systemImage: "plus.circle")
+                    Label("新建提醒任务", systemImage: "plus.circle")
                 }
-                .disabled(draftText.isEmpty)
             }
 
             let items = value.list("reminders", "items", "data", "records")
@@ -142,34 +133,44 @@ struct AIRemindersView: View {
     @ViewBuilder
     private func reminderRow(_ item: JSONValue, reload: Reload) -> some View {
         let id = item.first(of: "id", "reminder_id").displayString ?? ""
+        let state = item.first(of: "status", "state").displayString ?? ""
         VStack(alignment: .leading, spacing: 4) {
             HStack {
-                Text(item.first(of: "content", "text", "title").displayString ?? "—")
+                Text(item.first(of: "title", "content", "text").displayString ?? "AI 助手提醒")
                     .font(.subheadline)
                     .lineLimit(3)
                 Spacer()
-                if let state = item.first(of: "status", "state").displayString {
-                    StatusBadge(state, tone: badgeTone(for: state))
+                if !state.isEmpty {
+                    StatusBadge(Self.statusLabel(state), tone: badgeTone(for: state))
                 }
             }
-            if let time = item.first(of: "remind_at", "due_at", "time").displayString {
+            Text(Self.taskSummary(item["task"]))
+                .font(.caption).foregroundStyle(.secondary).lineLimit(2)
+            if let time = item.first(of: "run_at", "remind_at", "due_at", "time").displayString {
                 Text(Fmt.relative(.string(time)))
                     .font(.caption2).foregroundStyle(.secondary)
             }
+            if let user = item["from_user"].displayString, !user.isEmpty {
+                Text("接收用户：\(user)")
+                    .font(.caption2).foregroundStyle(.tertiary)
+            }
             if !id.isEmpty {
                 HStack(spacing: 14) {
-                    Button("取消") {
-                        runner.run("已取消", operation: {
-                            let api = try session.requireAPI()
-                            return try await api.ai.cancelAiAssistantReminder(reminderId: id)
-                        }, onSuccess: { await reload() })
+                    NavigationLink {
+                        AIReminderEditorView(reminder: item) {
+                            reload.fire()
+                        }
+                    } label: {
+                        Label("编辑", systemImage: "pencil")
                     }
-                    Button("完成") {
-                        runner.run("已更新", operation: {
-                            let api = try session.requireAPI()
-                            return try await api.ai.updateAiAssistantReminder(
-                                reminderId: id, .object(["status": .string("done")]))
-                        }, onSuccess: { await reload() })
+
+                    if state == "scheduled" {
+                        Button("取消") {
+                            runner.run("已取消", operation: {
+                                let api = try session.requireAPI()
+                                return try await api.ai.cancelAiAssistantReminder(reminderId: id)
+                            }, onSuccess: { await reload() })
+                        }
                     }
                     Button("删除") {
                         runner.run("已删除", operation: {
@@ -184,25 +185,308 @@ struct AIRemindersView: View {
             }
         }
     }
+
+    private static func statusLabel(_ status: String) -> String {
+        [
+            "scheduled": "待执行",
+            "running": "执行中",
+            "done": "已完成",
+            "failed": "失败",
+            "cancelled": "已取消",
+            "expired": "已过期",
+        ][status] ?? status
+    }
+
+    private static func taskSummary(_ task: JSONValue) -> String {
+        switch task["type"].string ?? "message" {
+        case "weather":
+            return "天气：\(task["location"].displayString ?? "未填写地区")"
+        case "web_search":
+            return "联网查询：\(task["query"].displayString ?? "未填写内容")"
+        default:
+            return task["message"].displayString ?? "普通提醒"
+        }
+    }
 }
 
-/// AI 工具权限（原始编辑，服务端结构未声明）。
+/// AI 提醒任务的新建与编辑表单。
+struct AIReminderEditorView: View {
+    @EnvironmentObject private var session: AppSession
+    @Environment(\.dismiss) private var dismiss
+    @StateObject private var runner = ActionRunner()
+
+    private let reminderID: String
+    private let onSaved: () -> Void
+
+    @State private var title: String
+    @State private var fromUser: String
+    @State private var runAt: Date
+    @State private var taskType: String
+    @State private var message: String
+    @State private var location: String
+    @State private var query: String
+
+    init(reminder: JSONValue?, onSaved: @escaping () -> Void) {
+        let item = reminder ?? .null
+        let task = item["task"]
+        let type = task["type"].string ?? "message"
+        reminderID = item.first(of: "id", "reminder_id").displayString ?? ""
+        self.onSaved = onSaved
+        _title = State(initialValue: item["title"].string ?? "")
+        _fromUser = State(initialValue: item["from_user"].string ?? "")
+        _runAt = State(initialValue: Self.date(from: item["run_at"]) ?? Date().addingTimeInterval(3_600))
+        _taskType = State(initialValue: ["message", "weather", "web_search"].contains(type) ? type : "message")
+        _message = State(initialValue: task["message"].string ?? item["title"].string ?? "")
+        _location = State(initialValue: task["location"].string ?? "")
+        _query = State(initialValue: task["query"].string ?? "")
+    }
+
+    var body: some View {
+        Form {
+            Section("任务信息") {
+                TextField("提醒标题", text: $title)
+                TextField("接收用户 ID（可选）", text: $fromUser)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                DatePicker("执行时间", selection: $runAt)
+                Picker("任务类型", selection: $taskType) {
+                    Text("普通提醒").tag("message")
+                    Text("天气提醒").tag("weather")
+                    Text("联网查询").tag("web_search")
+                }
+                .pickerStyle(.menu)
+            }
+
+            Section("任务参数") {
+                switch taskType {
+                case "weather":
+                    TextField("天气地区", text: $location)
+                case "web_search":
+                    TextField("查询内容", text: $query, axis: .vertical)
+                        .lineLimit(2...5)
+                default:
+                    TextField("提醒内容", text: $message, axis: .vertical)
+                        .lineLimit(3...8)
+                }
+            }
+
+            Section {
+                Button {
+                    save()
+                } label: {
+                    Label(reminderID.isEmpty ? "创建提醒" : "保存提醒",
+                          systemImage: "square.and.arrow.down")
+                }
+                .disabled(!isValid)
+            }
+        }
+        .navigationTitle(reminderID.isEmpty ? "新建提醒" : "编辑提醒")
+        .actionFeedback(runner)
+    }
+
+    private var isValid: Bool {
+        switch taskType {
+        case "weather": return !location.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        case "web_search": return !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        default:
+            return !message.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                || !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        }
+    }
+
+    private func save() {
+        runner.run(reminderID.isEmpty ? "提醒任务已创建" : "提醒任务已保存", operation: {
+            let api = try session.requireAPI()
+            if reminderID.isEmpty {
+                return try await api.ai.createAiAssistantReminder(payload)
+            }
+            return try await api.ai.updateAiAssistantReminder(reminderId: reminderID, payload)
+        }, onSuccess: {
+            onSaved()
+            dismiss()
+        })
+    }
+
+    private var payload: JSONValue {
+        let task: JSONValue
+        switch taskType {
+        case "weather":
+            task = .object(["type": .string("weather"), "location": .string(location)])
+        case "web_search":
+            task = .object(["type": .string("web_search"),
+                            "query": .string(query), "limit": .int(5)])
+        default:
+            task = .object(["type": .string("message"),
+                            "message": .string(message.isEmpty ? title : message)])
+        }
+        let timestamp = Self.formatter.string(from: runAt)
+        return .object([
+            "title": .string(title),
+            "from_user": .string(fromUser),
+            "run_at": .string(timestamp),
+            "run_at_text": .string(timestamp),
+            "task": task,
+        ])
+    }
+
+    private static let formatter: ISO8601DateFormatter = {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime]
+        return formatter
+    }()
+
+    private static func date(from value: JSONValue) -> Date? {
+        if let seconds = value.double { return Date(timeIntervalSince1970: seconds) }
+        guard let text = value.string else { return nil }
+        if let parsed = formatter.date(from: text) { return parsed }
+        let fractional = ISO8601DateFormatter()
+        fractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return fractional.date(from: text)
+    }
+}
+
+/// AI 工具权限与按服务端 schema 生成的工具配置入口。
 struct AIToolPermissionsView: View {
     @EnvironmentObject private var session: AppSession
 
     var body: some View {
-        JSONConfigScreen(
-            title: "工具权限",
-            note: "控制助手可以调用哪些服务端工具。true 表示允许，false 表示禁止。",
-            unwrapKeys: ["permissions", "data", "config"],
-            load: {
-                let api = try session.requireAPI()
-                return try await api.ai.readAiAssistantToolPermissions()
-            },
-            save: { edited in
-                let api = try session.requireAPI()
-                return try await api.ai.updateAiAssistantToolPermissions(edited)
-            })
+        RemoteList(title: "工具权限") {
+            let api = try session.requireAPI()
+            return try await api.ai.readAiAssistantToolPermissions()
+        } content: { value, reload in
+            let tools = value["tools"].object ?? [:]
+            let enabledCount = tools.values.filter { $0["enabled"].bool == true }.count
+
+            Section("概览") {
+                KeyValueRow("工具总数", String(tools.count))
+                KeyValueRow("已启用", String(enabledCount))
+            }
+
+            Section("工具列表") {
+                if tools.isEmpty { EmptyRow("服务端没有返回工具权限") }
+                ForEach(tools.keys.sorted(), id: \.self) { toolID in
+                    let tool = tools[toolID] ?? .null
+                    NavigationLink {
+                        AIToolEditorView(toolID: toolID, tool: tool) {
+                            reload.fire()
+                        }
+                    } label: {
+                        VStack(alignment: .leading, spacing: 3) {
+                            HStack {
+                                Text(tool["label"].displayString ?? toolID)
+                                Spacer()
+                                StatusBadge(tool["enabled"].bool == true ? "已启用" : "已停用",
+                                            tone: tool["enabled"].bool == true ? .good : .neutral)
+                            }
+                            Text(toolID)
+                                .font(.caption2).foregroundStyle(.tertiary)
+                            if tool["configurable"].bool == true {
+                                Text("包含可配置参数")
+                                    .font(.caption).foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+struct AIToolEditorView: View {
+    @EnvironmentObject private var session: AppSession
+    @Environment(\.dismiss) private var dismiss
+    @StateObject private var runner = ActionRunner()
+
+    private let toolID: String
+    private let tool: JSONValue
+    private let onSaved: () -> Void
+
+    @State private var enabled: Bool
+    @State private var config: JSONValue
+
+    init(toolID: String, tool: JSONValue, onSaved: @escaping () -> Void) {
+        self.toolID = toolID
+        self.tool = tool
+        self.onSaved = onSaved
+        _enabled = State(initialValue: tool["enabled"].bool ?? false)
+        _config = State(initialValue: tool["config"].object == nil ? .object([:]) : tool["config"])
+    }
+
+    var body: some View {
+        Form {
+            Section("权限") {
+                Toggle("启用工具", isOn: $enabled)
+                KeyValueRow("工具 ID", toolID, monospaced: true)
+            }
+
+            if schemaFields.isEmpty == false {
+                Section("工具参数") {
+                    ForEach(Array(schemaFields.enumerated()), id: \.offset) { _, field in
+                        fieldEditor(field)
+                    }
+                }
+            }
+
+            Section {
+                Button {
+                    save()
+                } label: {
+                    Label("保存工具配置", systemImage: "square.and.arrow.down")
+                }
+            }
+        }
+        .navigationTitle(tool["label"].displayString ?? toolID)
+        .actionFeedback(runner)
+    }
+
+    private var schemaFields: [JSONValue] {
+        tool.path("config_schema", "fields").array ?? []
+    }
+
+    @ViewBuilder
+    private func fieldEditor(_ field: JSONValue) -> some View {
+        let key = field["key"].displayString ?? ""
+        let label = field["label"].displayString ?? key
+        let binding = $config.child(key)
+        switch field["type"].string ?? "text" {
+        case "secret":
+            SecureField(label, text: binding.asString)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+        case "select":
+            Picker(label, selection: binding.asString) {
+                ForEach(Array((field["options"].array ?? []).enumerated()), id: \.offset) { _, option in
+                    let value = option["value"].displayString ?? ""
+                    Text(option["label"].displayString ?? value).tag(value)
+                }
+            }
+            .pickerStyle(.menu)
+        case "toggle":
+            Toggle(label, isOn: binding.asBool)
+        default:
+            TextField(field["placeholder"].displayString ?? label, text: binding.asString)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+        }
+    }
+
+    private func save() {
+        var update: [String: JSONValue] = ["enabled": .bool(enabled)]
+        if tool["configurable"].bool == true {
+            update["config"] = config
+        }
+        let updateValue = JSONValue.object(update)
+        runner.run("工具配置已保存", operation: {
+            let api = try session.requireAPI()
+            return try await api.ai.updateAiAssistantToolPermissions(.object([
+                "tools": .object([
+                    toolID: updateValue,
+                ]),
+            ]))
+        }, onSuccess: {
+            onSaved()
+            dismiss()
+        })
     }
 }
 
@@ -221,23 +505,24 @@ struct AIAuditView: View {
                 Stepper("最近 \(limit) 条", value: $limit, in: 20...500, step: 20)
                     .onChange(of: limit) { _, _ in queryKey += 1 }
             }
-            let items = value.list("audit", "items", "records", "data", "logs")
+            let items = value.list("events", "audit", "items", "records", "data", "logs")
             Section("记录（\(items.count)）") {
                 if items.isEmpty { EmptyRow("没有审计记录") }
                 ForEach(Array(items.enumerated()), id: \.offset) { _, item in
                     VStack(alignment: .leading, spacing: 3) {
                         HStack {
-                            Text(item.first(of: "tool", "action", "name").displayString ?? "—")
+                            Text(item.first(of: "event", "tool", "action", "name").displayString ?? "事件")
                                 .font(.caption.weight(.medium))
                             Spacer()
                             if let state = item.first(of: "status", "result").displayString {
                                 StatusBadge(state, tone: badgeTone(for: state))
                             }
                         }
-                        if let detail = item.first(of: "detail", "summary", "message", "args").displayString {
+                        if let detail = item.first(of: "tool", "reason", "reply_preview",
+                                                   "result_reason", "detail", "summary", "message").displayString {
                             Text(detail).font(.caption2).foregroundStyle(.secondary).lineLimit(3)
                         }
-                        if let time = item.first(of: "created_at", "time").displayString {
+                        if let time = item.first(of: "created_at", "timestamp", "time").displayString {
                             Text(Fmt.relative(.string(time)))
                                 .font(.caption2).foregroundStyle(.tertiary)
                         }
@@ -259,23 +544,29 @@ struct AIContextView: View {
             let api = try session.requireAPI()
             return try await api.ai.readAiAssistantContext()
         } content: { value, _ in
+            let users = value["users"].object ?? [:]
+            let conversationCount = users.values.filter {
+                $0["conversation_context"].object != nil
+            }.count
             Section("概览") {
-                KeyValueRow("消息数", value.deepFirst(of: "message_count", "count"))
-                KeyValueRow("Token 估算", value.deepFirst(of: "tokens", "token_count"))
-                KeyValueRow("已压缩", value.deepFirst(of: "compressed", "was_compressed"))
+                KeyValueRow("用户数", String(users.count))
+                KeyValueRow("上下文会话", "\(conversationCount) 个")
             }
-            let messages = value.list("messages", "context", "items")
-            Section("消息（\(messages.count)）") {
-                if messages.isEmpty { EmptyRow("上下文为空") }
-                ForEach(Array(messages.enumerated()), id: \.offset) { _, message in
+
+            Section("用户上下文") {
+                if users.isEmpty { EmptyRow("暂无上下文") }
+                ForEach(users.keys.sorted(), id: \.self) { userID in
+                    let context = users[userID]?["conversation_context"] ?? .null
+                    let interactions = context.list("recent_interactions", "messages", "items")
                     VStack(alignment: .leading, spacing: 3) {
-                        Text(message.first(of: "role", "from").displayString ?? "—")
-                            .font(.caption2.weight(.semibold))
-                            .foregroundStyle(.secondary)
-                        Text(message.first(of: "content", "text").displayString ?? "—")
-                            .font(.caption)
-                            .lineLimit(8)
-                            .textSelection(.enabled)
+                        Text(userID).font(.subheadline.weight(.medium))
+                        Text("\(interactions.count) 轮近期上下文")
+                            .font(.caption).foregroundStyle(.secondary)
+                        if let summary = context["summary"].displayString, !summary.isEmpty {
+                            Text(summary)
+                                .font(.caption2).foregroundStyle(.tertiary).lineLimit(5)
+                                .textSelection(.enabled)
+                        }
                     }
                 }
             }

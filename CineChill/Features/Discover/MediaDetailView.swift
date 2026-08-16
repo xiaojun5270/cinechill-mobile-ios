@@ -1,12 +1,19 @@
 import SwiftUI
 import UIKit
 
+private struct LibraryLookupResult {
+    let exists: Bool
+    let itemID: String?
+    let serverIndex: Int
+}
+
 /// 影视详情：TMDB 详情 + 本地库状态 + 订阅 / 入库检查。
 struct MediaDetailView: View {
     let summary: MediaSummary
 
     @EnvironmentObject private var session: AppSession
     @StateObject private var runner = ActionRunner()
+    @State private var libraryLookup: LibraryLookupResult?
 
     var body: some View {
         RemoteScroll(title: summary.title) {
@@ -25,7 +32,7 @@ struct MediaDetailView: View {
             header(detail)
             overview(detail)
             infoCard(detail, status: value["status"])
-            actionCard
+            actionCard(detail)
             seasonsCard(detail)
         }
         .actionFeedback(runner)
@@ -124,7 +131,7 @@ struct MediaDetailView: View {
 
     // MARK: - 操作
 
-    private var actionCard: some View {
+    private func actionCard(_ detail: JSONValue) -> some View {
         CardSection(title: "操作", systemImage: "bolt") {
             VStack(alignment: .leading, spacing: 12) {
                 Button {
@@ -133,14 +140,25 @@ struct MediaDetailView: View {
                     Label("订阅到 MoviePilot", systemImage: "bell.badge")
                 }
                 Button {
-                    checkLibrary()
+                    checkLibrary(detail)
                 } label: {
                     Label("检查是否已入库", systemImage: "magnifyingglass.circle")
                 }
                 Button {
-                    openInEmby()
+                    openInEmby(detail)
                 } label: {
                     Label("在 Emby 中打开", systemImage: "play.rectangle.on.rectangle")
+                }
+                if let libraryLookup {
+                    Label {
+                        Text(libraryLookup.exists
+                             ? libraryLookup.itemID.map { "已入库 · Emby ID \($0)" } ?? "已入库"
+                             : "未入库")
+                    } icon: {
+                        Image(systemName: libraryLookup.exists ? "checkmark.circle.fill" : "xmark.circle")
+                    }
+                    .font(.caption)
+                    .foregroundStyle(libraryLookup.exists ? Color.green : Color.secondary)
                 }
             }
             .font(.subheadline)
@@ -156,52 +174,229 @@ struct MediaDetailView: View {
         }
     }
 
-    private func checkLibrary() {
-        guard let id = summary.tmdbID else { return }
-        runner.run(nil) {
-            let api = try session.requireAPI()
-            let existenceKey = "\(id):\(summary.mediaType)"
-            let year = summary.raw.first(of: "year", "ProductionYear", "release_date", "first_air_date")
-                .displayString
-                .map { String($0.prefix(4)) } ?? ""
-            let item = JSONValue.object([
-                "tmdb_id": .int(id),
-                "title": .string(summary.title),
-                "year": .string(year),
-                "media_type": .string(summary.mediaType),
-                "source": .string(summary.raw["source"].displayString ?? ""),
-                "id": summary.raw["id"].isNull ? .string("") : summary.raw["id"],
-                "_existence_key": .string(existenceKey),
-            ])
-            let result = try await api.discover.checkLibraryExists(.array([item]), resolveMissing: false)
-            let exists = result["results"][existenceKey].bool
-                ?? result.deepFirst(of: "exists", "in_library", "found").bool
-                ?? false
-            return JSONValue.object([
-                "success": .bool(true),
-                "message": .string(exists ? "媒体库中已存在" : "媒体库中未找到"),
-            ])
-        }
-    }
-
-    private func openInEmby() {
-        guard let idText = summary.raw.first(of: "emby_item_id", "item_id", "ItemId", "Id").displayString
-        else {
-            runner.run(nil) {
-                JSONValue.object(["success": .bool(false), "detail": .string("该条目没有 Emby ItemId")])
-            }
+    private func checkLibrary(_ detail: JSONValue) {
+        guard let id = summary.tmdbID else {
+            runner.alertIsError = true
+            runner.alertText = "该条目没有 TMDB ID，无法检查入库状态"
             return
         }
-        runner.run(nil) {
+        runner.run(nil, operation: {
             let api = try session.requireAPI()
-            let result = try await api.discover.getEmbyWebUrl(serverIdx: nil, itemId: idText)
-            if let link = result.deepFirst(of: "url", "web_url", "link").string,
-               let url = URL(string: link) {
-                await MainActor.run { UIApplication.shared.open(url) }
-                return JSONValue.object(["success": .bool(true)])
-            }
-            return JSONValue.object(["success": .bool(false), "detail": .string("未获取到播放地址")])
+            let lookup = try await resolveLibraryTarget(api: api, detail: detail, tmdbID: id)
+            let message = lookup.exists
+                ? lookup.itemID.map { "媒体库中已存在（Emby ID \($0)）" } ?? "媒体库中已存在"
+                : "媒体库中未找到"
+            var response: [String: JSONValue] = [
+                "success": .bool(true),
+                "exists": .bool(lookup.exists),
+                "server_idx": .int(lookup.serverIndex),
+                "message": .string(message),
+            ]
+            if let itemID = lookup.itemID { response["emby_item_id"] = .string(itemID) }
+            return .object(response)
+        }, onSuccess: {
+            let result = runner.lastResult
+            libraryLookup = LibraryLookupResult(
+                exists: result["exists"].bool ?? false,
+                itemID: result["emby_item_id"].displayString,
+                serverIndex: result["server_idx"].int ?? 0)
+            runner.alertIsError = false
+            runner.alertText = result["message"].displayString ?? "检查完成"
+        })
+    }
+
+    private func openInEmby(_ detail: JSONValue) {
+        guard let tmdbID = summary.tmdbID else {
+            runner.alertIsError = true
+            runner.alertText = "该条目没有 TMDB ID，无法定位 Emby 条目"
+            return
         }
+        let cachedLookup = libraryLookup
+        runner.run(nil, operation: {
+            let api = try session.requireAPI()
+            let lookup: LibraryLookupResult
+            if let cachedLookup, cachedLookup.exists, cachedLookup.itemID != nil {
+                lookup = cachedLookup
+            } else {
+                lookup = try await resolveLibraryTarget(api: api, detail: detail, tmdbID: tmdbID)
+            }
+            guard lookup.exists else {
+                return .object(["success": .bool(false), "detail": .string("媒体库中未找到该条目")])
+            }
+            guard let itemID = lookup.itemID, !itemID.isEmpty else {
+                return .object(["success": .bool(false),
+                                "detail": .string("已确认入库，但未能解析 Emby ItemId")])
+            }
+            let result = try await api.discover.getEmbyWebUrl(
+                serverIdx: lookup.serverIndex, itemId: itemID)
+            if let link = result.displayString
+                ?? result.deepFirst(of: "url", "web_url", "webUrl", "link").displayString,
+               let url = externalURL(link) {
+                await MainActor.run { UIApplication.shared.open(url) }
+                return .object(["success": .bool(true),
+                                "exists": .bool(true),
+                                "emby_item_id": .string(itemID),
+                                "server_idx": .int(lookup.serverIndex)])
+            }
+            return .object(["success": .bool(false), "detail": .string("未获取到 Emby 打开地址")])
+        }, onSuccess: {
+            libraryLookup = LibraryLookupResult(
+                exists: true,
+                itemID: runner.lastResult["emby_item_id"].displayString,
+                serverIndex: runner.lastResult["server_idx"].int ?? 0)
+        })
+    }
+
+    private func resolveLibraryTarget(api: CineChillAPI, detail: JSONValue,
+                                      tmdbID: Int) async throws -> LibraryLookupResult {
+        if let directID = directEmbyItemID(detail) ?? directEmbyItemID(summary.raw) {
+            let serverIndex = directServerIndex(detail)
+                ?? directServerIndex(summary.raw)
+                ?? 0
+            return LibraryLookupResult(exists: true, itemID: directID, serverIndex: serverIndex)
+        }
+
+        let existenceKey = "\(tmdbID):\(summary.mediaType)"
+        let title = mediaTitle(detail)
+        let year = mediaYear(detail)
+        let item = JSONValue.object([
+            "tmdb_id": .int(tmdbID),
+            "title": .string(title),
+            "year": .string(year),
+            "media_type": .string(summary.mediaType),
+            "source": .string(summary.raw["source"].displayString ?? ""),
+            "id": summary.raw["id"].isNull ? .string("") : summary.raw["id"],
+            "_existence_key": .string(existenceKey),
+        ])
+
+        var endpointExists = false
+        var existenceError: Error?
+        do {
+            let result = try await api.discover.checkLibraryExists(
+                .array([item]), resolveMissing: false)
+            endpointExists = result["results"][existenceKey].bool
+                ?? result.deepFirst(of: "exists", "in_library", "found").bool
+                ?? false
+        } catch {
+            existenceError = error
+        }
+
+        var matchedItem: JSONValue = .null
+        do {
+            let connection = try await EmbyConnection.require(api: api)
+            let searchResult = try await api.server.embySearch(
+                EmbySearchRequest(url: connection.url,
+                                  key: connection.key,
+                                  publicHost: connection.publicHost,
+                                  query: title,
+                                  libraryId: nil,
+                                  typeValue: "Primary"))
+            matchedItem = bestEmbyMatch(in: searchResult, title: title,
+                                        year: year, tmdbID: tmdbID)
+        } catch {
+            if let existenceError { throw existenceError }
+        }
+
+        let matchedID = matchedItem.first(of: "id", "Id", "ItemId", "item_id").displayString
+        if let existenceError, matchedID == nil { throw existenceError }
+        return LibraryLookupResult(exists: endpointExists || matchedID != nil,
+                                   itemID: matchedID,
+                                   serverIndex: matchedItem.first(of: "server_idx", "serverIndex").int ?? 0)
+    }
+
+    private func bestEmbyMatch(in response: JSONValue, title: String,
+                               year: String, tmdbID: Int) -> JSONValue {
+        var items = response.list("items", "results", "data", "Items")
+        if items.isEmpty {
+            for key in ["data", "result", "payload"] {
+                items = response[key].list("items", "results", "Items")
+                if !items.isEmpty { break }
+            }
+        }
+        let expectedTitle = normalizedMediaTitle(title)
+        let expectedType = summary.mediaType == "tv" ? "series" : "movie"
+        guard let match = items.max(by: {
+            matchScore($0, expectedTitle: expectedTitle,
+                       expectedYear: year, expectedType: expectedType,
+                       tmdbID: tmdbID)
+                < matchScore($1, expectedTitle: expectedTitle,
+                             expectedYear: year, expectedType: expectedType,
+                             tmdbID: tmdbID)
+        }) else { return .null }
+        return matchScore(match, expectedTitle: expectedTitle,
+                          expectedYear: year, expectedType: expectedType,
+                          tmdbID: tmdbID) > 0 ? match : .null
+    }
+
+    private func matchScore(_ item: JSONValue, expectedTitle: String,
+                            expectedYear: String, expectedType: String,
+                            tmdbID: Int) -> Int {
+        let candidateTitle = normalizedMediaTitle(
+            item.first(of: "name", "Name", "title", "Title").displayString ?? "")
+        let providerIDs = item.deepFirst(of: "ProviderIds", "provider_ids")
+        let candidateTMDB = providerIDs.first(of: "Tmdb", "tmdb", "tmdb_id").int
+            ?? item.first(of: "tmdb_id", "tmdbId").int
+        let candidateType = item.first(of: "type", "Type", "media_type")
+            .displayString?.lowercased() ?? ""
+        let candidateYear = item.first(of: "year", "ProductionYear", "production_year")
+            .displayString ?? ""
+        let titleMatches = !candidateTitle.isEmpty
+            && (candidateTitle == expectedTitle
+                || candidateTitle.contains(expectedTitle)
+                || expectedTitle.contains(candidateTitle))
+        let typeMatches = candidateType.isEmpty || candidateType.contains(expectedType)
+        let yearConflicts = !expectedYear.isEmpty && !candidateYear.isEmpty
+            && !candidateYear.hasPrefix(expectedYear)
+        guard candidateTMDB == tmdbID || (titleMatches && typeMatches && !yearConflicts) else {
+            return 0
+        }
+
+        var score = candidateTMDB == tmdbID ? 100 : 50
+        if candidateTitle == expectedTitle { score += 30 }
+        if candidateType.contains(expectedType) { score += 10 }
+        if !expectedYear.isEmpty, candidateYear.hasPrefix(expectedYear) { score += 10 }
+        return score
+    }
+
+    private func directEmbyItemID(_ value: JSONValue) -> String? {
+        for node in [value, value["item"], value["library_item"], value["emby"]] {
+            if let itemID = node.first(of: "emby_item_id", "embyItemId", "emby_id",
+                                       "EmbyId", "ItemId").displayString,
+               !itemID.isEmpty {
+                return itemID
+            }
+        }
+        return nil
+    }
+
+    private func directServerIndex(_ value: JSONValue) -> Int? {
+        for node in [value, value["item"], value["library_item"], value["emby"]] {
+            if let index = node.first(of: "server_idx", "serverIndex").int { return index }
+        }
+        return nil
+    }
+
+    private func mediaTitle(_ detail: JSONValue) -> String {
+        detail.first(of: "title", "name", "original_title", "original_name").displayString
+            ?? summary.title
+    }
+
+    private func mediaYear(_ detail: JSONValue) -> String {
+        let value = detail.first(of: "year", "ProductionYear", "release_date", "first_air_date")
+            .displayString
+            ?? summary.raw.first(of: "year", "ProductionYear", "release_date", "first_air_date")
+                .displayString
+            ?? ""
+        return String(value.prefix(4))
+    }
+
+    private func normalizedMediaTitle(_ value: String) -> String {
+        value.lowercased().filter { $0.isLetter || $0.isNumber }
+    }
+
+    private func externalURL(_ value: String) -> URL? {
+        if value.hasPrefix("/") { return session.absoluteURL(value) }
+        return URL(string: value)
     }
 
     // MARK: - 分季

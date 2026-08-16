@@ -34,12 +34,23 @@ public extension MoviePilotAPI {
 
     @discardableResult
     func checkSitesHealth(siteIDs: [JSONValue] = []) async throws -> JSONValue {
-        try await client.send(
-            .post,
-            "/api/moviepilot/sites/health-check",
-            query: nil,
-            body: JSONValue.object(["site_ids": .array(siteIDs)]),
-            timeout: 300)
+        do {
+            return try await client.send(
+                .post,
+                "/api/moviepilot/sites/health-check",
+                query: nil,
+                body: JSONValue.object(["site_ids": .array(siteIDs)]),
+                timeout: 300)
+        } catch let error as APIError where error.isAmbiguousWriteCompletion {
+            // 请求已经发出后再断线时不能重放 POST；服务端通常仍在后台执行。
+            let status = (try? await getSiteMonitorStatus()) ?? .null
+            return .object([
+                "status": .string("ok"),
+                "accepted": .bool(true),
+                "connection_interrupted": .bool(true),
+                "monitor_status": status,
+            ])
+        }
     }
 
     @discardableResult

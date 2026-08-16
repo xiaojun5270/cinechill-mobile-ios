@@ -77,7 +77,7 @@ struct MoviePilotSitesView: View {
             }
             .disabled(status.running || status.healthCheckRunning)
             Button {
-                runner.run("已启动全部站点健康检查") {
+                runner.run("健康检查请求已提交") {
                     let api = try session.requireAPI()
                     return try await api.moviePilot.checkSitesHealth()
                 } onSuccess: {
@@ -87,6 +87,17 @@ struct MoviePilotSitesView: View {
                 Label("全部健康检查", systemImage: "heart.text.square")
             }
             .disabled(status.running || status.healthCheckRunning)
+            .task(id: status.hasActiveWork) {
+                guard status.hasActiveWork else { return }
+                while !Task.isCancelled {
+                    do {
+                        try await Task.sleep(nanoseconds: 4_000_000_000)
+                    } catch {
+                        return
+                    }
+                    await reload()
+                }
+            }
         } header: {
             Text("新种监控")
         } footer: {
@@ -408,7 +419,7 @@ struct MoviePilotSiteDetailView: View {
     }
 
     private func runHealthCheck() {
-        runner.run("已启动站点健康检查") {
+        runner.run("健康检查请求已提交") {
             let api = try session.requireAPI()
             return try await api.moviePilot.checkSitesHealth(siteIDs: [siteID])
         } onSuccess: {
@@ -500,6 +511,13 @@ struct MoviePilotMonitorData {
     var nextRunAt: JSONValue = .null
     var sites: [String: JSONValue] = [:]
     var downloadTasks: [JSONValue] = []
+
+    var hasActiveWork: Bool {
+        running || healthCheckRunning || sites.values.contains { status in
+            status.first(of: "running", "monitor_running").bool == true
+                || status.first(of: "health_checking", "checking").bool == true
+        }
+    }
 
     init(response: JSONValue) {
         var node = response
