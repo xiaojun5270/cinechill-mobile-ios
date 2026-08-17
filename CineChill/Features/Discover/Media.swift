@@ -1,14 +1,24 @@
 import SwiftUI
 
 /// 从服务端各类列表响应里取出条目数组，兼容 `results` / `subjects` / `data.results` 等写法。
-func mediaItemList(_ value: JSONValue) -> [JSONValue] {
+func mediaItemList(_ value: JSONValue, defaultMediaType: String? = nil) -> [JSONValue] {
     let direct = value.list("subjects", "results", "items", "movies")
-    if !direct.isEmpty { return direct }
+    if !direct.isEmpty { return mediaItems(direct, defaultMediaType: defaultMediaType) }
     for key in ["data", "result", "payload", "media", "response"] {
         let nested = value[key].list("subjects", "results", "items")
-        if !nested.isEmpty { return nested }
+        if !nested.isEmpty { return mediaItems(nested, defaultMediaType: defaultMediaType) }
     }
     return []
+}
+
+private func mediaItems(_ items: [JSONValue], defaultMediaType: String?) -> [JSONValue] {
+    guard let defaultMediaType else { return items }
+    return items.map { item in
+        guard item.first(of: "media_type", "type", "mtype").string == nil else { return item }
+        var tagged = item
+        tagged["media_type"] = .string(defaultMediaType)
+        return tagged
+    }
 }
 
 /// 海报地址推断：TMDB 用图片代理，豆瓣走豆瓣代理，其余外链走通用缓存代理。

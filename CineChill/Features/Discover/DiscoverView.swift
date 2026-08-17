@@ -96,7 +96,7 @@ struct FeedGridView: View {
         do {
             let api = try session.requireAPI()
             let response = try await feed.load(api: api, page: page)
-            let fetched = mediaItemList(response)
+            let fetched = mediaItemList(response, defaultMediaType: feed.mediaTypeHint)
             if reset {
                 items = fetched
             } else {
@@ -118,14 +118,23 @@ struct FeedGridView: View {
 struct MediaSearchView: View {
     @EnvironmentObject private var session: AppSession
     @State private var query = ""
+    @State private var scope: MediaSearchScope = .all
     @State private var items: [JSONValue] = []
     @State private var isLoading = false
     @State private var errorText: String?
     @State private var didSearch = false
+    @State private var searchID = UUID()
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
+                Picker("媒体类型", selection: $scope) {
+                    ForEach(MediaSearchScope.allCases) { item in
+                        Text(item.title).tag(item)
+                    }
+                }
+                .pickerStyle(.segmented)
+
                 if isLoading {
                     ProgressView().frame(maxWidth: .infinity).padding(.top, 40)
                 } else if let errorText {
@@ -146,24 +155,76 @@ struct MediaSearchView: View {
         .navigationTitle("搜索")
         .searchable(text: $query, placement: .navigationBarDrawer(displayMode: .always), prompt: "片名 / 关键词")
         .onSubmit(of: .search) { Task { await search() } }
+        .onChange(of: scope) { _, _ in
+            if didSearch { Task { await search() } }
+        }
     }
 
     private func search() async {
         let text = query.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty, !isLoading else { return }
+        guard !text.isEmpty else { return }
+        let requestID = UUID()
+        searchID = requestID
         isLoading = true
         errorText = nil
         do {
             let api = try session.requireAPI()
-            let response = try await api.discover.searchMedia(query: text, type: nil, page: 1)
-            items = mediaItemList(response)
+            let fetched = try await scope.search(api: api, query: text)
+            guard searchID == requestID else { return }
+            items = fetched
             didSearch = true
         } catch let error as APIError {
+            guard searchID == requestID else { return }
             if error.isAuthFailure { session.handle(error: error) }
             errorText = error.errorDescription
         } catch {
+            guard searchID == requestID else { return }
             errorText = error.localizedDescription
         }
-        isLoading = false
+        if searchID == requestID { isLoading = false }
+    }
+}
+
+private enum MediaSearchScope: String, CaseIterable, Identifiable {
+    case all
+    case movie
+    case tv
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .all: return "全部"
+        case .movie: return "电影"
+        case .tv: return "剧集"
+        }
+    }
+
+    func search(api: CineChillAPI, query: String) async throws -> [JSONValue] {
+        switch self {
+        case .all:
+            async let movieResponse = api.discover.searchMedia(query: query, type: "movie", page: 1)
+            async let tvResponse = api.discover.searchMedia(query: query, type: "tv", page: 1)
+            let (movies, shows) = try await (movieResponse, tvResponse)
+            return Self.interleaved(Self.items(in: movies, mediaType: "movie"),
+                                    Self.items(in: shows, mediaType: "tv"))
+        case .movie, .tv:
+            let response = try await api.discover.searchMedia(query: query, type: rawValue, page: 1)
+            return Self.items(in: response, mediaType: rawValue)
+        }
+    }
+
+    private static func items(in response: JSONValue, mediaType: String) -> [JSONValue] {
+        mediaItemList(response, defaultMediaType: mediaType)
+    }
+
+    private static func interleaved(_ movies: [JSONValue], _ shows: [JSONValue]) -> [JSONValue] {
+        var result: [JSONValue] = []
+        result.reserveCapacity(movies.count + shows.count)
+        for index in 0..<max(movies.count, shows.count) {
+            if movies.indices.contains(index) { result.append(movies[index]) }
+            if shows.indices.contains(index) { result.append(shows[index]) }
+        }
+        return result
     }
 }

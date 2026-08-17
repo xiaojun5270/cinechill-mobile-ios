@@ -37,6 +37,20 @@ enum DiscoverFeed: String, CaseIterable, Identifiable {
         }
     }
 
+    /// 部分豆瓣列表不返回媒体类型，需要按接口语义补齐，避免剧集被回退显示成电影。
+    var mediaTypeHint: String? {
+        switch self {
+        case .tmdbPopularTv, .doubanHotTv, .doubanNewTv,
+             .doubanChineseWeekly, .doubanGlobalWeekly:
+            return "tv"
+        case .tmdbPopularMovies, .tmdbNowPlaying, .doubanHotMovies,
+             .doubanNewMovies, .doubanTop250, .doubanShowing:
+            return "movie"
+        case .todayPicks, .tmdbTrending, .doubanHotAnime:
+            return nil
+        }
+    }
+
     func load(api: CineChillAPI, page: Int) async throws -> JSONValue {
         let start = (page - 1) * 20
         switch self {
