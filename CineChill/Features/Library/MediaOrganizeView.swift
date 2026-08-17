@@ -15,12 +15,7 @@ struct MediaOrganizeView: View {
                     Label("整理配置", systemImage: "slider.horizontal.3")
                 }
                 NavigationLink {
-                    RemoteList(title: "默认配置", subtitle: "服务端内置的整理默认值，仅供参考") {
-                        let api = try session.requireAPI()
-                        return try await api.organize.getDefaultConfig()
-                    } content: { value, _ in
-                        Section { JSONFieldList(value: value) }
-                    }
+                    OrganizeDefaultConfigView()
                 } label: {
                     Label("查看默认配置", systemImage: "doc.text.magnifyingglass")
                 }
@@ -642,7 +637,7 @@ struct OrganizeConfigView: View {
         return .object(object)
     }
 
-    private static let webDefaults: [String: JSONValue] = [
+    fileprivate static let webDefaults: [String: JSONValue] = [
         "drive_index": 0,
         "source_cid": "0", "source_name": "根目录",
         "target_cid": "0", "target_name": "根目录",
@@ -674,6 +669,202 @@ struct OrganizeConfigView: View {
         "tv_season_folder_format": "Season {season_num}",
         "tv_episode_format": "{en_title}.{season_episode}.{year}.{resource_pix}.{web_source}.{resource_type}.{video_encode}.{color_depth}.{video_effect}.{fps}.{audio_encode}-{resource_team}"
     ]
+}
+
+/// 服务端内置默认值的完整只读说明，避免直接暴露英文 JSON 字段。
+private struct OrganizeDefaultConfigView: View {
+    @EnvironmentObject private var session: AppSession
+    @State private var phase: Phase = .loading
+    @State private var config: JSONValue = .null
+
+    private enum Phase: Equatable {
+        case loading
+        case ready
+        case failed(String)
+    }
+
+    private struct Group: Identifiable {
+        let title: String
+        let keys: [String]
+        var id: String { title }
+    }
+
+    private static let groups = [
+        Group(title: "115 网盘与目录", keys: [
+            "drive_index", "source_name", "source_cid", "target_name", "target_cid",
+            "failed_name", "failed_cid", "dedup_name", "dedup_cid", "wash_name", "wash_cid"
+        ]),
+        Group(title: "自动整理", keys: [
+            "life_monitor_enabled", "life_monitor_start_mode", "auto_sync_strm",
+            "emby_scrapers_enabled", "organize_parse_mode"
+        ]),
+        Group(title: "入库拦截", keys: [
+            "validation_year_enabled", "validation_chinese_title_enabled",
+            "validation_poster_enabled", "validation_tv_episode_enabled"
+        ]),
+        Group(title: "刮削内容", keys: [
+            "scrape_enabled", "emby_local_scrape", "scrape_nfo", "scrape_poster",
+            "scrape_fanart", "scrape_logo", "scrape_banner", "scrape_thumb",
+            "scrape_season_poster", "scrape_episode_thumb"
+        ]),
+        Group(title: "文件覆盖策略", keys: [
+            "policy_nfo", "policy_poster", "policy_fanart", "policy_logo",
+            "policy_banner", "policy_thumb", "policy_season_poster", "policy_episode_thumb"
+        ]),
+        Group(title: "TMDb 元数据补齐", keys: [
+            "metadata_repair_auto_enabled", "metadata_repair_cron",
+            "metadata_repair_tv_libraries", "metadata_repair_episode_conditions",
+            "metadata_repair_image_conditions", "metadata_repair_lookback_days",
+            "metadata_repair_workers"
+        ]),
+        Group(title: "洗版策略", keys: [
+            "wash_enabled", "wash_by_equivalent_size", "wash_tolerance_ratio"
+        ]),
+        Group(title: "重命名模板", keys: [
+            "movie_folder_format", "movie_rename_format", "tv_folder_format",
+            "tv_season_folder_format", "tv_episode_format"
+        ])
+    ]
+
+    private static let templateKeys: Set<String> = [
+        "movie_folder_format", "movie_rename_format", "tv_folder_format",
+        "tv_season_folder_format", "tv_episode_format"
+    ]
+
+    var body: some View {
+        Form {
+            switch phase {
+            case .loading:
+                LoadingRow()
+            case .failed(let message):
+                FailureRow(message: message) { Task { await load() } }
+            case .ready:
+                Section {
+                    Label("以下为服务端内置默认值，仅供参考", systemImage: "info.circle")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+                ForEach(Self.groups) { group in
+                    Section(group.title) {
+                        ForEach(group.keys, id: \.self) { key in
+                            configRow(key)
+                        }
+                    }
+                }
+            }
+        }
+        .navigationTitle("默认配置")
+        .task {
+            if phase == .loading { await load() }
+        }
+    }
+
+    @ViewBuilder
+    private func configRow(_ key: String) -> some View {
+        let value = config[key]
+        if let items = value.array {
+            NavigationLink {
+                List {
+                    if items.isEmpty, key == "metadata_repair_tv_libraries" {
+                        Label("全部剧集媒体库", systemImage: "checkmark.circle")
+                    } else if items.isEmpty {
+                        EmptyRow("未设置")
+                    } else {
+                        ForEach(Array(items.enumerated()), id: \.offset) { _, item in
+                            Label(localizedArrayValue(item.displayString ?? "", for: key),
+                                  systemImage: "checkmark.circle")
+                        }
+                    }
+                }
+                .navigationTitle(fieldLabel(key))
+            } label: {
+                HStack {
+                    Text(fieldLabel(key))
+                    Spacer()
+                    Text(arraySummary(items, for: key))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+        } else if Self.templateKeys.contains(key) {
+            VStack(alignment: .leading, spacing: 6) {
+                Text(fieldLabel(key))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Text(value.displayString ?? "—")
+                    .font(.system(.footnote, design: .monospaced))
+                    .textSelection(.enabled)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .padding(.vertical, 3)
+        } else {
+            KeyValueRow(fieldLabel(key), .string(localizedValue(value, for: key)))
+        }
+    }
+
+    private func localizedValue(_ value: JSONValue, for key: String) -> String {
+        switch key {
+        case "life_monitor_start_mode":
+            return value.string == "latest" ? "仅监听最新事件" : "从上次事件继续"
+        case "organize_parse_mode":
+            return value.string == "ffprobe_full" ? "全量 ffprobe" : "智能 ffprobe"
+        case let policy where policy.hasPrefix("policy_"):
+            if value.string == "missing_only" { return "仅补缺" }
+            if value.string == "overwrite" { return "覆盖现有" }
+            return value.displayString ?? "—"
+        case "metadata_repair_lookback_days":
+            let days = value.int ?? 60
+            return days == 0 ? "全部历史剧集" : "最近 \(days) 天"
+        case "metadata_repair_workers":
+            return "\(value.int ?? 8) 个并发"
+        case "wash_tolerance_ratio":
+            let ratio = value.double ?? 0
+            return ratio == ratio.rounded() ? "\(Int(ratio))%" : String(format: "%.1f%%", ratio)
+        default:
+            return Fmt.text(value)
+        }
+    }
+
+    private func localizedArrayValue(_ value: String, for key: String) -> String {
+        guard key != "metadata_repair_tv_libraries" else { return value }
+        switch value {
+        case "no_overview": return "无简介"
+        case "non_chinese_overview": return "非中文简介"
+        case "default_episode_title": return "默认集标题"
+        case "missing_episode_thumb": return "无图"
+        default: return value
+        }
+    }
+
+    private func arraySummary(_ items: [JSONValue], for key: String) -> String {
+        if items.isEmpty, key == "metadata_repair_tv_libraries" { return "全部" }
+        if items.isEmpty { return "未设置" }
+        return "\(items.count) 项"
+    }
+
+    private func load() async {
+        phase = .loading
+        do {
+            let api = try session.requireAPI()
+            let response = try await api.organize.getDefaultConfig()
+            var fetched = response
+            for key in ["config", "data", "settings"] where fetched[key].object != nil {
+                fetched = fetched[key]
+                break
+            }
+            var values = OrganizeConfigView.webDefaults
+            for (key, value) in fetched.object ?? [:] where !value.isNull {
+                values[key] = value
+            }
+            config = .object(values)
+            phase = .ready
+        } catch let error as APIError {
+            if error.isAuthFailure { session.handle(error: error) }
+            phase = .failed(error.errorDescription ?? "加载失败")
+        } catch {
+            phase = .failed(error.localizedDescription)
+        }
+    }
 }
 
 private struct OrganizeSelectionOption: Identifiable, Hashable {
