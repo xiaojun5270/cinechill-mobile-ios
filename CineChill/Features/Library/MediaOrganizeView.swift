@@ -1076,26 +1076,319 @@ struct RenameTemplateView: View {
 /// 不影响「二级分类规则」页面里 movie/tv 规则列表的保存。
 struct SubClassifyConfigView: View {
     @EnvironmentObject private var session: AppSession
+    @StateObject private var runner = ActionRunner()
+
+    @State private var phase: Phase = .loading
+    @State private var draft: JSONValue = .null
+
+    private enum Phase: Equatable {
+        case loading
+        case ready
+        case failed(String)
+    }
+
+    private static let defaultConfig: JSONValue = .object([
+        "movie": .object([
+            "enabled": true,
+            "levels": ["year_decade"]
+        ]),
+        "tv": .object([
+            "enabled": true,
+            "levels": ["year_decade"]
+        ]),
+        "sync_emby_library": true,
+        "emby_server_idx": 0,
+        "emby_library_level": "level3"
+    ])
 
     var body: some View {
-        JSONConfigScreen(
-            title: "二级分类设置",
-            note: "内容取自二级分类规则接口：若服务端把设置放在 sub_classify 字段里会自动展开，否则展示整份规则配置。保存只提交到二级分类保存接口（含 Emby 同步配置），规则列表本身请在「二级分类规则」页面维护。",
-            unwrapKeys: [],
-            load: {
-                let api = try session.requireAPI()
-                let response = try await api.organize.getCategoryRules()
-                let node = response.deepFirst(of: "sub_classify", "subClassify", "sub_classify_config")
-                if node.object != nil { return node }
-                for key in ["data", "config", "rules"] where response[key].object != nil {
-                    return response[key]
+        Form {
+            switch phase {
+            case .loading:
+                LoadingRow()
+            case .failed(let message):
+                FailureRow(message: message) { Task { await load() } }
+            case .ready:
+                Section {
+                    Label("二级分类会在规则命中的目录下继续创建子目录",
+                          systemImage: "square.stack.3d.up")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
                 }
-                return response
-            },
-            save: { edited in
-                let api = try session.requireAPI()
-                return try await api.organize.saveSubClassify(edited)
-            })
+
+                Section {
+                    Toggle("同步 Emby 媒体库", isOn: boolBinding("sync_emby_library", fallback: true))
+                    Stepper("Emby 服务器序号：\(intValue("emby_server_idx"))",
+                            value: intBinding("emby_server_idx", range: 0...9))
+                        .disabled(!boolValue("sync_emby_library", fallback: true))
+                    Picker("媒体库合并方式",
+                           selection: stringBinding("emby_library_level", fallback: "level3")) {
+                        Text("每条规则一个库").tag("rule")
+                        Text("按 3 级目录合并").tag("level3")
+                        Text("按 2 级目录合并").tag("level2")
+                        Text("按 1 级目录合并").tag("level1")
+                    }
+                    .disabled(!boolValue("sync_emby_library", fallback: true))
+                } header: {
+                    Text("Emby 媒体库同步")
+                } footer: {
+                    Text("启用后会按所选目录层级创建或合并 Emby 媒体库；服务器序号与服务端 Emby 配置顺序一致。")
+                }
+
+                mediaSection("电影", key: "movie", icon: "film")
+                mediaSection("剧集", key: "tv", icon: "tv")
+
+                Section {
+                    Button {
+                        save()
+                    } label: {
+                        Label("保存二级分类设置", systemImage: "square.and.arrow.down")
+                    }
+                } footer: {
+                    Text("这里只保存二级分类及 Emby 同步参数；电影和剧集的匹配规则仍在“二级分类规则”页面维护。")
+                }
+            }
+        }
+        .navigationTitle("二级分类设置")
+        .actionFeedback(runner)
+        .task {
+            if phase == .loading { await load() }
+        }
+    }
+
+    private func mediaSection(_ title: String, key: String, icon: String) -> some View {
+        Section {
+            Toggle("启用\(title)二级分类", isOn: nestedBoolBinding(key, "enabled", fallback: true))
+            NavigationLink {
+                SubClassifyLevelsView(title: "\(title)分类层级",
+                                      selection: levelsBinding(key))
+            } label: {
+                HStack {
+                    Label("分类层级与顺序", systemImage: icon)
+                    Spacer()
+                    Text(levelsSummary(key))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.trailing)
+                }
+            }
+            .disabled(!nestedBoolValue(key, "enabled", fallback: true))
+        } header: {
+            Text("\(title)二级分类")
+        } footer: {
+            Text("层级从上到下依次生成目录，可进入页面添加、删除或拖动排序。")
+        }
+    }
+
+    private func boolValue(_ key: String, fallback: Bool = false) -> Bool {
+        draft[key].bool ?? Self.defaultConfig[key].bool ?? fallback
+    }
+
+    private func boolBinding(_ key: String, fallback: Bool = false) -> Binding<Bool> {
+        Binding(
+            get: { boolValue(key, fallback: fallback) },
+            set: { draft[key] = .bool($0) })
+    }
+
+    private func intValue(_ key: String) -> Int {
+        draft[key].int ?? Self.defaultConfig[key].int ?? 0
+    }
+
+    private func intBinding(_ key: String, range: ClosedRange<Int>) -> Binding<Int> {
+        Binding(
+            get: { min(max(intValue(key), range.lowerBound), range.upperBound) },
+            set: { draft[key] = .int(min(max($0, range.lowerBound), range.upperBound)) })
+    }
+
+    private func stringBinding(_ key: String, fallback: String) -> Binding<String> {
+        Binding(
+            get: { draft[key].string ?? Self.defaultConfig[key].string ?? fallback },
+            set: { draft[key] = .string($0) })
+    }
+
+    private func nestedBoolValue(_ objectKey: String, _ key: String,
+                                 fallback: Bool = false) -> Bool {
+        draft[objectKey][key].bool ?? Self.defaultConfig[objectKey][key].bool ?? fallback
+    }
+
+    private func nestedBoolBinding(_ objectKey: String, _ key: String,
+                                   fallback: Bool = false) -> Binding<Bool> {
+        Binding(
+            get: { nestedBoolValue(objectKey, key, fallback: fallback) },
+            set: { draft[objectKey][key] = .bool($0) })
+    }
+
+    private func levelsValue(_ key: String) -> [String] {
+        let values = draft[key]["levels"].array ?? Self.defaultConfig[key]["levels"].array ?? []
+        var result: [String] = []
+        for value in values.compactMap(\.displayString) where !result.contains(value) {
+            result.append(value)
+        }
+        return result
+    }
+
+    private func levelsBinding(_ key: String) -> Binding<[String]> {
+        Binding(
+            get: { levelsValue(key) },
+            set: { draft[key]["levels"] = .array($0.map(JSONValue.string)) })
+    }
+
+    private func levelsSummary(_ key: String) -> String {
+        let levels = levelsValue(key)
+        if levels.isEmpty { return "未设置" }
+        return levels.map(SubClassifyLevelsView.label).joined(separator: " → ")
+    }
+
+    private func load() async {
+        phase = .loading
+        do {
+            let api = try session.requireAPI()
+            let response = try await api.organize.getCategoryRules()
+            draft = Self.normalized(Self.extractConfig(from: response))
+            phase = .ready
+        } catch let error as APIError {
+            if error.isAuthFailure { session.handle(error: error) }
+            phase = .failed(error.errorDescription ?? "加载失败")
+        } catch {
+            phase = .failed(error.localizedDescription)
+        }
+    }
+
+    private func save() {
+        draft = Self.normalized(draft)
+        let updated = draft
+        runner.run("二级分类设置已保存", operation: {
+            let api = try session.requireAPI()
+            return try await api.organize.saveSubClassify(updated)
+        })
+    }
+
+    private static func normalized(_ value: JSONValue) -> JSONValue {
+        var root = defaultConfig.object ?? [:]
+        for (key, field) in value.object ?? [:] where !field.isNull {
+            root[key] = field
+        }
+
+        for mediaType in ["movie", "tv"] {
+            var media = defaultConfig[mediaType].object ?? [:]
+            for (key, field) in value[mediaType].object ?? [:] where !field.isNull {
+                media[key] = field
+            }
+            media["enabled"] = .bool(media["enabled"]?.bool ?? true)
+            let rawLevels = media["levels"]?.array?.compactMap(\.displayString) ?? ["year_decade"]
+            var levels: [String] = []
+            for level in rawLevels where !level.isEmpty && !levels.contains(level) {
+                levels.append(level)
+            }
+            media["levels"] = .array(levels.map(JSONValue.string))
+            root[mediaType] = .object(media)
+        }
+
+        root["sync_emby_library"] = .bool(root["sync_emby_library"]?.bool ?? true)
+        root["emby_server_idx"] = .int(min(max(root["emby_server_idx"]?.int ?? 0, 0), 9))
+        let libraryLevel = root["emby_library_level"]?.string ?? "level3"
+        root["emby_library_level"] = .string(
+            ["rule", "level3", "level2", "level1"].contains(libraryLevel) ? libraryLevel : "level3")
+        return .object(root)
+    }
+
+    private static func extractConfig(from response: JSONValue) -> JSONValue {
+        let nested = response.deepFirst(of: "sub_classify", "subClassify", "sub_classify_config")
+        if nested.object != nil { return nested }
+        if isSubClassifyConfig(response) { return response }
+        for key in ["data", "config", "rules"] {
+            let candidate = response[key]
+            if isSubClassifyConfig(candidate) { return candidate }
+        }
+        return .object([:])
+    }
+
+    private static func isSubClassifyConfig(_ value: JSONValue) -> Bool {
+        value["sync_emby_library"].bool != nil
+            || value["emby_server_idx"].int != nil
+            || value["emby_library_level"].string != nil
+            || value["movie"].object != nil
+            || value["tv"].object != nil
+    }
+}
+
+private struct SubClassifyLevelsView: View {
+    let title: String
+    @Binding var selection: [String]
+
+    private struct Option: Identifiable {
+        let id: String
+        let label: String
+        let example: String
+    }
+
+    private static let options = [
+        Option(id: "year_decade", label: "年代", example: "2010s"),
+        Option(id: "year", label: "年份", example: "2016"),
+        Option(id: "rating_tier", label: "评分段", example: "8-9分"),
+        Option(id: "origin_country", label: "国家", example: "日本"),
+        Option(id: "genre_label", label: "类型", example: "动画")
+    ]
+
+    var body: some View {
+        List {
+            Section {
+                if selection.isEmpty {
+                    EmptyRow("未设置分类层级")
+                }
+                ForEach(selection, id: \.self) { level in
+                    let option = Self.option(level)
+                    HStack {
+                        Label(option.label, systemImage: "line.3.horizontal")
+                        Spacer()
+                        Text(option.example)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .onMove { offsets, destination in
+                    selection.move(fromOffsets: offsets, toOffset: destination)
+                }
+                .onDelete { offsets in
+                    selection.remove(atOffsets: offsets)
+                }
+            } header: {
+                Text("已启用层级")
+            } footer: {
+                Text("拖动可调整目录生成顺序，向左滑动可移除。")
+            }
+
+            let available = Self.options.filter { !selection.contains($0.id) }
+            if !available.isEmpty {
+                Section("添加层级") {
+                    ForEach(available) { option in
+                        Button {
+                            selection.append(option.id)
+                        } label: {
+                            HStack {
+                                Label(option.label, systemImage: "plus.circle")
+                                Spacer()
+                                Text(option.example)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                        .foregroundStyle(.primary)
+                    }
+                }
+            }
+        }
+        .navigationTitle(title)
+        .toolbar { EditButton() }
+    }
+
+    static func label(_ value: String) -> String {
+        option(value).label
+    }
+
+    private static func option(_ value: String) -> Option {
+        options.first(where: { $0.id == value })
+            ?? Option(id: value, label: value, example: "兼容字段")
     }
 }
 
